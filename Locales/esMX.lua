@@ -1,4 +1,4 @@
-local L = LibStub("AceLocale-3.0"):NewLocale("WhisperToast", "esMX")
+﻿local L = LibStub("AceLocale-3.0"):NewLocale("WhisperToast", "esMX")
 if not L then return end
 
--- Latin American Spanish translations placeholder.
+--@localization(locale="esMX", format="lua_additive_table", handle-unlocalized="english")@

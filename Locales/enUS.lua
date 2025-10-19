@@ -1,6 +1,7 @@
 local L = LibStub("AceLocale-3.0"):NewLocale("WhisperToast", "enUS", true)
 if not L then return end
 
+--@do-not-package@
 L["WHISPER_TITLE"] = "%s (Whisper):"
 L["BNET_TITLE"] = "%s (BNet):"
 L["GUILD_TITLE"] = "%s (Guild):"
@@ -128,3 +129,6 @@ L["POS_SAVED"] = "|cff00ff00Position saved:|r %s (X: %d, Y: %d)"
 L["POS_RESET"] = "Position reset"
 L["SLASH_HELP"] = "Use the addon options via: ESC > Interface > AddOns > WhisperToast"
 L["TEST_MESSAGE"] = "This is a test message to see how your customization looks!"
+--@end-do-not-package@
+
+--@localization(locale="enUS", format="lua_additive_table", handle-unlocalized="english")@

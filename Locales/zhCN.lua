@@ -1,4 +1,4 @@
-local L = LibStub("AceLocale-3.0"):NewLocale("WhisperToast", "zhCN")
+﻿local L = LibStub("AceLocale-3.0"):NewLocale("WhisperToast", "zhCN")
 if not L then return end
 
--- Simplified Chinese translations should be added below. Fallback to enUS is automatic.
+--@localization(locale="zhCN", format="lua_additive_table", handle-unlocalized="english")@
