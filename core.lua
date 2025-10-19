@@ -5,6 +5,31 @@ WhisperToast = LibStub("AceAddon-3.0"):NewAddon(addonName, "AceConsole-3.0", "Ac
 
 local L = LibStub("AceLocale-3.0"):GetLocale("WhisperToast")
 local TOAST_SPACING = 15
+local previewSoundHandle = nil
+
+-- Optional custom sounds. Place your .ogg/.wav files under
+-- Interface\AddOns\WhisperToast\Sounds\ and register them here.
+local SOUND_FOLDER = "Interface\\AddOns\\WhisperToast\\Sounds\\"
+local CUSTOM_SOUNDS = {
+    ["custom_sound_01"] = { label = "Custom Sound 01", file = SOUND_FOLDER .. "sound01.wav" },
+    ["custom_sound_02"] = { label = "Custom Sound 02", file = SOUND_FOLDER .. "sound02.wav" },
+    ["custom_sound_03"] = { label = "Custom Sound 03", file = SOUND_FOLDER .. "sound03.wav" },
+    ["custom_sound_04"] = { label = "Custom Sound 04", file = SOUND_FOLDER .. "sound04.wav" },
+    ["custom_sound_05"] = { label = "Custom Sound 05", file = SOUND_FOLDER .. "sound05.wav" },
+    ["custom_sound_06"] = { label = "Custom Sound 06", file = SOUND_FOLDER .. "sound06.wav" },
+    ["custom_sound_07"] = { label = "Custom Sound 07", file = SOUND_FOLDER .. "sound07.wav" },
+    ["custom_sound_08"] = { label = "Custom Sound 08", file = SOUND_FOLDER .. "sound08.wav" },
+    ["custom_sound_09"] = { label = "Custom Sound 09", file = SOUND_FOLDER .. "sound09.wav" },
+    ["custom_sound_10"] = { label = "Custom Sound 10", file = SOUND_FOLDER .. "sound10.wav" },
+    ["custom_sound_11"] = { label = "Custom Sound 11", file = SOUND_FOLDER .. "sound11.wav" },
+    ["custom_sound_12"] = { label = "Custom Sound 12", file = SOUND_FOLDER .. "sound12.wav" },
+    ["custom_sound_13"] = { label = "Custom Sound 13", file = SOUND_FOLDER .. "sound13.wav" },
+    ["custom_sound_14"] = { label = "Custom Sound 14", file = SOUND_FOLDER .. "sound14.wav" },
+    ["custom_sound_15"] = { label = "Custom Sound 15", file = SOUND_FOLDER .. "sound15.wav" },
+    ["custom_sound_16"] = { label = "Custom Sound 16", file = SOUND_FOLDER .. "sound16.wav" },
+    ["custom_sound_17"] = { label = "Custom Sound 17", file = SOUND_FOLDER .. "sound17.wav" },
+    ["custom_sound_18"] = { label = "Custom Sound 18", file = SOUND_FOLDER .. "sound18.wav" },
+}
 
 local SOUND_LABEL_KEYS = {
     [11504] = "SOUND_NAME_11504",
@@ -511,6 +536,27 @@ function WhisperToast:SetToastPortrait(toast, sender, fallbackIcon)
     portrait:Hide()
 end
 
+function WhisperToast:PlayConfiguredSound(value, channel)
+    if not value then return end
+
+    local willPlay, handle
+    local numericValue = tonumber(value)
+    if type(value) == "number" then
+        willPlay, handle = PlaySound(value, channel)
+    elseif numericValue then
+        willPlay, handle = PlaySound(numericValue, channel)
+    else
+        local data = CUSTOM_SOUNDS[value]
+        if data and data.file then
+            willPlay, handle = PlaySoundFile(data.file, channel)
+        end
+    end
+
+    if handle and type(handle) == "number" then
+        return handle
+    end
+end
+
 function WhisperToast:UpdateToastPositions()
     local height = self.db.profile.appearance.height
     for i, toast in ipairs(activeToasts) do 
@@ -545,9 +591,9 @@ function WhisperToast:HandleChatMessage(msgType, message, sender)
 
     local soundProfile = profile.sound or {}
     local soundEnabled = soundProfile.enabled and soundProfile[config.soundEnabledKey]
-    local soundId = soundProfile[config.soundKey]
-    if soundEnabled and soundId then
-        PlaySound(soundId, soundProfile.volume)
+    local soundValue = soundProfile[config.soundKey]
+    if soundEnabled and soundValue then
+        self:PlayConfiguredSound(soundValue, soundProfile.volume)
     end
 end
 
@@ -564,6 +610,17 @@ function WhisperToast:SetupOptions()
             local idStr = tostring(id)
             if not list[idStr] then
                 list[idStr] = L[key] or SOUND_LABEL_DEFAULTS[id] or ("Sound " .. id)
+            end
+        end
+        local customKeys = {}
+        for key in pairs(CUSTOM_SOUNDS) do
+            customKeys[#customKeys + 1] = key
+        end
+        table.sort(customKeys)
+        for _, key in ipairs(customKeys) do
+            local data = CUSTOM_SOUNDS[key]
+            if data then
+                list[key] = data.label or key
             end
         end
         return list
@@ -596,12 +653,26 @@ function WhisperToast:SetupOptions()
                     desc = L[spec.selectDescKey] or spec.selectDescFallback,
                     values = GetSoundList(),
                     get = function()
-                        return tostring(self.db.profile.sound[spec.soundField])
+                        local current = self.db.profile.sound[spec.soundField]
+                        if type(current) == "number" then
+                            return tostring(current)
+                        end
+                        return current
                     end,
                     set = function(_, value)
-                        local id = tonumber(value)
-                        self.db.profile.sound[spec.soundField] = id
-                        PlaySound(id, self.db.profile.sound.volume)
+                        if type(previewSoundHandle) == "number" then
+                            StopSound(previewSoundHandle)
+                        end
+                        previewSoundHandle = nil
+
+                        local numericValue = tonumber(value)
+                        if numericValue then
+                            self.db.profile.sound[spec.soundField] = numericValue
+                            previewSoundHandle = self:PlayConfiguredSound(numericValue, self.db.profile.sound.volume)
+                        else
+                            self.db.profile.sound[spec.soundField] = value
+                            previewSoundHandle = self:PlayConfiguredSound(value, self.db.profile.sound.volume)
+                        end
                     end,
                 },
             },
