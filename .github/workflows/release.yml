@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cfpackager
+        run: |
+          python -m pip install --upgrade pip
+          pip install cfpackager
+
+      - name: Build addon
+        env:
+          CURSEFORGE_API_TOKEN: ${{ secrets.CURSEFORGE_API_TOKEN }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          WOWINTERFACE_API_TOKEN: ${{ secrets.WOWINTERFACE_API_TOKEN }}
+        run: |
+          cfpackager package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: whispertoast-release
+          path: .release/*
