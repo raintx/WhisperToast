@@ -1,0 +1,12 @@
+## Interface: 110205
+## Title: WhisperToast
+## Notes: Mostra mensagens de chat como uma notificacao da battle.net.
+## Author: Amaryssein
+## Version: 1.1
+## OptionalDeps: Ace3
+## SavedVariables: WhisperToastDB
+
+embeds.xml
+Localization.lua
+core.lua
+custom_toast.lua
