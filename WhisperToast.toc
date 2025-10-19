@@ -7,6 +7,16 @@
 ## SavedVariables: WhisperToastDB
 
 embeds.xml
-Localization.lua
+Locales\enUS.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\ptBR.lua
+Locales\deDE.lua
+Locales\frFR.lua
+Locales\itIT.lua
+Locales\ruRU.lua
+Locales\koKR.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
 core.lua
 custom_toast.lua

@@ -3,7 +3,7 @@
 local addonName, addon = ...
 WhisperToast = LibStub("AceAddon-3.0"):NewAddon(addonName, "AceConsole-3.0", "AceEvent-3.0")
 
-local L = WhisperToast_Locale or {}
+local L = LibStub("AceLocale-3.0"):GetLocale("WhisperToast")
 local TOAST_SPACING = 15
 
 local SOUND_LABEL_KEYS = {
