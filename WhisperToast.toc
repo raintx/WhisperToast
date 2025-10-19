@@ -2,7 +2,7 @@
 ## Title: WhisperToast
 ## Notes: Mostra mensagens de chat como uma notificacao da battle.net.
 ## Author: Amaryssein
-## Version: 1.4
+## Version: 1.5
 ## OptionalDeps: Ace3
 ## SavedVariables: WhisperToastDB
 
