@@ -70,6 +70,81 @@ local SOUND_LABEL_DEFAULTS = {
     [21388] = "Whistle",
 }
 
+local CHAT_EVENTS = {
+    CHAT_MSG_WHISPER = "WHISPER",
+    CHAT_MSG_BN_WHISPER = "BN",
+    CHAT_MSG_GUILD = "GUILD",
+    CHAT_MSG_PARTY = "PARTY",
+    CHAT_MSG_PARTY_LEADER = "PARTY",
+    CHAT_MSG_RAID = "RAID",
+    CHAT_MSG_RAID_LEADER = "RAID",
+    CHAT_MSG_RAID_WARNING = "RAID",
+}
+
+local MESSAGE_CONFIG = {
+    WHISPER = {
+        flag = "whispers",
+        titleKey = "WHISPER_TITLE",
+        titleFallback = "%s (Whisper):",
+        icon = "Interface\\FriendsFrame\\Battlenet-Icon",
+        soundKey = "whisperSound",
+        soundEnabledKey = "whisperSoundEnabled",
+        colorKey = "whisperColor",
+    },
+    BN = {
+        flag = "whispers",
+        titleKey = "BNET_TITLE",
+        titleFallback = "%s (BNet):",
+        icon = "Interface\\FriendsFrame\\Battlenet-Icon",
+        soundKey = "whisperSound",
+        soundEnabledKey = "whisperSoundEnabled",
+        colorKey = "bnetColor",
+    },
+    GUILD = {
+        flag = "guild",
+        titleKey = "GUILD_TITLE",
+        titleFallback = "%s (Guild):",
+        icon = "Interface\\CHATFRAME\\UI-ChatIcon-WoW",
+        soundKey = "guildSound",
+        soundEnabledKey = "guildSoundEnabled",
+        colorKey = "guildColor",
+    },
+    PARTY = {
+        flag = "party",
+        titleKey = "PARTY_TITLE",
+        titleFallback = "%s (Party):",
+        icon = "Interface\\GROUPFRAME\\UI-Group-Icon",
+        soundKey = "partySound",
+        soundEnabledKey = "partySoundEnabled",
+        colorKey = "partyColor",
+    },
+    RAID = {
+        flag = "raid",
+        titleKey = "RAID_TITLE",
+        titleFallback = "%s (Raid):",
+        icon = "Interface\\TARGETINGFRAME\\UI-RaidTargetingIcon_8",
+        soundKey = "raidSound",
+        soundEnabledKey = "raidSoundEnabled",
+        colorKey = "raidColor",
+    },
+}
+
+local function CleanPlayerName(name)
+    return name and name:gsub("%-.*$", "")
+end
+
+local function TrySetPortraitTexture(portrait, target)
+    if not target or target == "" then
+        return false
+    end
+    local success = pcall(SetPortraitTexture, portrait, target)
+    if not success then
+        return false
+    end
+    local texture = portrait:GetTexture()
+    return texture and texture ~= 0
+end
+
 
 local defaults = {
     profile = {
@@ -110,14 +185,9 @@ function WhisperToast:OnInitialize()
     self:SetupOptions()
     self:RegisterChatCommand("whispertoast", "SlashCommand")
     self:RegisterChatCommand("wt", "SlashCommand")
-    self:RegisterEvent("CHAT_MSG_WHISPER")
-    self:RegisterEvent("CHAT_MSG_BN_WHISPER")
-    self:RegisterEvent("CHAT_MSG_GUILD")
-    self:RegisterEvent("CHAT_MSG_PARTY")
-    self:RegisterEvent("CHAT_MSG_PARTY_LEADER")
-    self:RegisterEvent("CHAT_MSG_RAID")
-    self:RegisterEvent("CHAT_MSG_RAID_LEADER")
-    self:RegisterEvent("CHAT_MSG_RAID_WARNING")
+    for event in pairs(CHAT_EVENTS) do
+        self:RegisterEvent(event, "OnChatEvent")
+    end
 end
 
 function WhisperToast:RefreshConfig()
@@ -312,126 +382,7 @@ function WhisperToast:ShowToast(icon, title, message, sender, titleColor)
         toast.Title:SetTextColor(app.titleColor.r, app.titleColor.g, app.titleColor.b, app.titleColor.a)
     end
     
-    local showPortrait = self.db.profile.behavior.showPortrait
-    if showPortrait and sender then
-        if string.find(sender, "#") then
-            -- Battle.net - usar ícone
-            toast.Icon:SetTexture(icon)
-            toast.Icon:Show()
-            toast.Portrait:Hide()
-        else
-            -- Jogador WoW - tentar várias formas
-            local portraitSet = false
-            
-            -- Tentativa 1: Usar nome original (com realm se tiver)
-            local success = pcall(function() SetPortraitTexture(toast.Portrait, sender) end)
-            if success and toast.Portrait:GetTexture() and toast.Portrait:GetTexture() ~= 0 then
-                portraitSet = true
-            end
-            
-            -- Tentativa 2: Se não funcionou, tentar adicionar o realm do jogador
-            if not portraitSet then
-                local playerRealm = GetRealmName()
-                local senderWithRealm = sender .. "-" .. playerRealm
-                success = pcall(function() SetPortraitTexture(toast.Portrait, senderWithRealm) end)
-                if success and toast.Portrait:GetTexture() and toast.Portrait:GetTexture() ~= 0 then
-                    portraitSet = true
-                end
-            end
-            
-            -- Tentativa 3: Tentar apenas o nome sem realm
-            if not portraitSet then
-                local cleanName = sender:gsub("%-.*$", "")
-                success = pcall(function() SetPortraitTexture(toast.Portrait, cleanName) end)
-                if success and toast.Portrait:GetTexture() and toast.Portrait:GetTexture() ~= 0 then
-                    portraitSet = true
-                end
-            end
-            
-            -- Tentativa 4: Buscar na lista de amigos usando C_FriendList
-            if not portraitSet and C_FriendList then
-                local cleanName = sender:gsub("%-.*$", "")
-                local numFriends = C_FriendList.GetNumFriends()
-                for i = 1, numFriends do
-                    local friendInfo = C_FriendList.GetFriendInfoByIndex(i)
-                    if friendInfo and friendInfo.name then
-                        local friendCleanName = friendInfo.name:gsub("%-.*$", "")
-                        if friendCleanName == cleanName then
-                            -- Tentar com o nome completo do amigo
-                            success = pcall(function() SetPortraitTexture(toast.Portrait, friendInfo.name) end)
-                            if success and toast.Portrait:GetTexture() and toast.Portrait:GetTexture() ~= 0 then
-                                portraitSet = true
-                                break
-                            end
-                        end
-                    end
-                end
-            end
-            
-            -- Tentativa 5: Buscar em grupo/raide
-            if not portraitSet then
-                local cleanName = sender:gsub("%-.*$", "")
-                
-                -- Verificar em raide
-                if IsInRaid() then
-                    for i = 1, GetNumGroupMembers() do
-                        local name = GetRaidRosterInfo(i)
-                        if name and name:gsub("%-.*$", "") == cleanName then
-                            success = pcall(function() SetPortraitTexture(toast.Portrait, name) end)
-                            if success and toast.Portrait:GetTexture() and toast.Portrait:GetTexture() ~= 0 then
-                                portraitSet = true
-                                break
-                            end
-                        end
-                    end
-                end
-                
-                -- Verificar em grupo
-                if not portraitSet and IsInGroup() then
-                    for i = 1, GetNumSubgroupMembers() do
-                        local unit = "party" .. i
-                        local name = UnitName(unit)
-                        if name and name:gsub("%-.*$", "") == cleanName then
-                            -- Usar a unit diretamente é mais confiável
-                            success = pcall(function() SetPortraitTexture(toast.Portrait, unit) end)
-                            if success and toast.Portrait:GetTexture() and toast.Portrait:GetTexture() ~= 0 then
-                                portraitSet = true
-                                break
-                            end
-                        end
-                    end
-                end
-                
-                -- Verificar o próprio jogador
-                if not portraitSet and UnitName("player"):gsub("%-.*$", "") == cleanName then
-                    success = pcall(function() SetPortraitTexture(toast.Portrait, "player") end)
-                    if success and toast.Portrait:GetTexture() and toast.Portrait:GetTexture() ~= 0 then
-                        portraitSet = true
-                    end
-                end
-            end
-            
-            -- Aplicar resultado
-            if portraitSet then
-                toast.Portrait:Show()
-                toast.Icon:Hide()
-            else
-                -- Buscar ícone de classe como fallback
-                local classIcon = self:GetClassIconForPlayer(sender)
-                if classIcon then
-                    toast.Icon:SetTexture(classIcon)
-                else
-                    toast.Icon:SetTexture(icon)
-                end
-                toast.Icon:Show()
-                toast.Portrait:Hide()
-            end
-        end
-    else
-        toast.Icon:SetTexture(icon)
-        toast.Icon:Show()
-        toast.Portrait:Hide()
-    end
+    self:SetToastPortrait(toast, sender, icon)
     
     local displayTime = self.db.profile.behavior.displayTime
     toast.Timer:SetMinMaxValues(0, displayTime)
@@ -449,7 +400,7 @@ function WhisperToast:GetClassIconForPlayer(playerName)
     if not playerName then return nil end
     
     -- Limpar nome do servidor
-    local cleanName = playerName:gsub("%-.*$", "")
+    local cleanName = CleanPlayerName(playerName)
     
     -- Verificar se está em grupo/raide
     if IsInRaid() then
@@ -474,6 +425,92 @@ function WhisperToast:GetClassIconForPlayer(playerName)
     return nil
 end
 
+function WhisperToast:TrySetPortraitFromFriends(portrait, cleanName)
+    if not cleanName or not C_FriendList then
+        return false
+    end
+    local numFriends = C_FriendList.GetNumFriends()
+    for i = 1, numFriends do
+        local friendInfo = C_FriendList.GetFriendInfoByIndex(i)
+        local friendName = friendInfo and friendInfo.name
+        if friendName and CleanPlayerName(friendName) == cleanName then
+            if TrySetPortraitTexture(portrait, friendName) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function WhisperToast:TrySetPortraitFromGroup(portrait, cleanName)
+    if not cleanName then
+        return false
+    end
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            local name = GetRaidRosterInfo(i)
+            if name and CleanPlayerName(name) == cleanName then
+                if TrySetPortraitTexture(portrait, name) then
+                    return true
+                end
+            end
+        end
+    end
+    if IsInGroup() then
+        for i = 1, GetNumSubgroupMembers() do
+            local unit = "party" .. i
+            local name = UnitName(unit)
+            if name and CleanPlayerName(name) == cleanName then
+                if TrySetPortraitTexture(portrait, unit) then
+                    return true
+                end
+            end
+        end
+    end
+    if CleanPlayerName(UnitName("player")) == cleanName then
+        return TrySetPortraitTexture(portrait, "player")
+    end
+    return false
+end
+
+function WhisperToast:SetToastPortrait(toast, sender, fallbackIcon)
+    local portrait = toast.Portrait
+    if not self.db.profile.behavior.showPortrait or not sender then
+        toast.Icon:SetTexture(fallbackIcon)
+        toast.Icon:Show()
+        portrait:Hide()
+        return
+    end
+
+    if sender:find("#") then
+        toast.Icon:SetTexture(fallbackIcon)
+        toast.Icon:Show()
+        portrait:Hide()
+        return
+    end
+
+    if TrySetPortraitTexture(portrait, sender) then
+        portrait:Show()
+        toast.Icon:Hide()
+        return
+    end
+
+    local cleanName = CleanPlayerName(sender)
+    if TrySetPortraitTexture(portrait, sender .. "-" .. GetRealmName())
+        or TrySetPortraitTexture(portrait, cleanName)
+        or self:TrySetPortraitFromFriends(portrait, cleanName)
+        or self:TrySetPortraitFromGroup(portrait, cleanName) then
+        portrait:Show()
+        toast.Icon:Hide()
+        return
+    end
+
+    local classIcon = self:GetClassIconForPlayer(sender)
+    toast.Icon:SetTexture(classIcon or fallbackIcon)
+    toast.Icon:Show()
+    portrait:Hide()
+end
+
 function WhisperToast:UpdateToastPositions()
     local height = self.db.profile.appearance.height
     for i, toast in ipairs(activeToasts) do 
@@ -481,53 +518,36 @@ function WhisperToast:UpdateToastPositions()
     end
 end
 
-function WhisperToast:CHAT_MSG_WHISPER(event, message, sender) self:HandleChatMessage("WHISPER", message, sender) end
-function WhisperToast:CHAT_MSG_BN_WHISPER(event, message, sender) self:HandleChatMessage("BN", message, sender) end
-function WhisperToast:CHAT_MSG_GUILD(event, message, sender) self:HandleChatMessage("GUILD", message, sender) end
-function WhisperToast:CHAT_MSG_PARTY(event, message, sender) self:HandleChatMessage("PARTY", message, sender) end
-function WhisperToast:CHAT_MSG_PARTY_LEADER(event, message, sender) self:HandleChatMessage("PARTY", message, sender) end
-function WhisperToast:CHAT_MSG_RAID(event, message, sender) self:HandleChatMessage("RAID", message, sender) end
-function WhisperToast:CHAT_MSG_RAID_LEADER(event, message, sender) self:HandleChatMessage("RAID", message, sender) end
-function WhisperToast:CHAT_MSG_RAID_WARNING(event, message, sender) self:HandleChatMessage("RAID", message, sender) end
+function WhisperToast:OnChatEvent(event, message, sender, ...)
+    local msgType = CHAT_EVENTS[event]
+    if msgType then
+        self:HandleChatMessage(msgType, message, sender, ...)
+    end
+end
 
 function WhisperToast:HandleChatMessage(msgType, message, sender)
-    local senderName = sender and sender:gsub("%-.*$", "") or "?"
-    local cfg = self.db.profile
-    local icon, title, sound, titleColor, soundEnabled
-    if msgType == "WHISPER" and cfg.whispers then 
-        title = string.format(L["WHISPER_TITLE"] or "%s (Whisper):", senderName)
-        icon = "Interface\\FriendsFrame\\Battlenet-Icon"
-        sound = cfg.sound.whisperSound
-        soundEnabled = cfg.sound.whisperSoundEnabled
-        titleColor = cfg.appearance.whisperColor
-    elseif msgType == "BN" and cfg.whispers then 
-        title = string.format(L["BNET_TITLE"] or "%s (BNet):", senderName)
-        icon = "Interface\\FriendsFrame\\Battlenet-Icon"
-        sound = cfg.sound.whisperSound
-        soundEnabled = cfg.sound.whisperSoundEnabled
-        titleColor = cfg.appearance.bnetColor
-    elseif msgType == "GUILD" and cfg.guild then 
-        title = string.format(L["GUILD_TITLE"] or "%s (Guild):", senderName)
-        icon = "Interface\\CHATFRAME\\UI-ChatIcon-WoW"
-        sound = cfg.sound.guildSound
-        soundEnabled = cfg.sound.guildSoundEnabled
-        titleColor = cfg.appearance.guildColor
-    elseif msgType == "PARTY" and cfg.party then 
-        title = string.format(L["PARTY_TITLE"] or "%s (Party):", senderName)
-        icon = "Interface\\GROUPFRAME\\UI-Group-Icon"
-        sound = cfg.sound.partySound
-        soundEnabled = cfg.sound.partySoundEnabled
-        titleColor = cfg.appearance.partyColor
-    elseif msgType == "RAID" and cfg.raid then 
-        title = string.format(L["RAID_TITLE"] or "%s (Raid):", senderName)
-        icon = "Interface\\TARGETINGFRAME\\UI-RaidTargetingIcon_8"
-        sound = cfg.sound.raidSound
-        soundEnabled = cfg.sound.raidSoundEnabled
-        titleColor = cfg.appearance.raidColor
+    local config = MESSAGE_CONFIG[msgType]
+    if not config then
+        return
     end
-    if title then 
-        self:Show(icon, title, message, sender, titleColor)
-        if sound and cfg.sound.enabled and soundEnabled then PlaySound(sound, cfg.sound.volume) end
+
+    local profile = self.db.profile
+    if not profile[config.flag] then
+        return
+    end
+
+    local senderName = CleanPlayerName(sender) or "?"
+    local title = string.format(L[config.titleKey] or config.titleFallback, senderName)
+    local appearance = profile.appearance or {}
+    local titleColor = appearance[config.colorKey]
+
+    self:Show(config.icon, title, message or "", sender, titleColor)
+
+    local soundProfile = profile.sound or {}
+    local soundEnabled = soundProfile.enabled and soundProfile[config.soundEnabledKey]
+    local soundId = soundProfile[config.soundKey]
+    if soundEnabled and soundId then
+        PlaySound(soundId, soundProfile.volume)
     end
 end
 
@@ -547,6 +567,45 @@ function WhisperToast:SetupOptions()
             end
         end
         return list
+    end
+    local function CreateSoundGroup(spec)
+        return {
+            order = spec.order,
+            type = "group",
+            inline = true,
+            name = L[spec.labelKey] or spec.labelFallback,
+            args = {
+                enabled = {
+                    order = 1,
+                    type = "toggle",
+                    width = "full",
+                    name = L[spec.toggleKey] or spec.toggleFallback,
+                    desc = L[spec.toggleDescKey] or spec.toggleDescFallback,
+                    get = function()
+                        return self.db.profile.sound[spec.enabledField]
+                    end,
+                    set = function(_, value)
+                        self.db.profile.sound[spec.enabledField] = value
+                    end,
+                },
+                sound = {
+                    order = 2,
+                    type = "select",
+                    width = "full",
+                    name = L[spec.selectKey] or spec.selectFallback,
+                    desc = L[spec.selectDescKey] or spec.selectDescFallback,
+                    values = GetSoundList(),
+                    get = function()
+                        return tostring(self.db.profile.sound[spec.soundField])
+                    end,
+                    set = function(_, value)
+                        local id = tonumber(value)
+                        self.db.profile.sound[spec.soundField] = id
+                        PlaySound(id, self.db.profile.sound.volume)
+                    end,
+                },
+            },
+        }
     end
     local options = { 
         name = L["OPTIONS_TITLE"] or "WhisperToast", 
@@ -583,46 +642,66 @@ function WhisperToast:SetupOptions()
                 Dialog = L["SOUND_VOLUME_DIALOG"] or "Dialog",
             }, get = function() return self.db.profile.sound.volume end, set = function(_, v) self.db.profile.sound.volume = v end },
             soundIndividualHeader = { order = 38, type = "header", name = L["SECTION_SOUND_INDIVIDUAL"] or "Sons Individuais" },
-            whisperSoundGroup = {
+            whisperSoundGroup = CreateSoundGroup({
                 order = 39,
-                type = "group",
-                inline = true,
-                name = L["SOUND_WHISPER"] or "Whisper Sound",
-                args = {
-                    whisperSoundEnabled = { order = 1, type = "toggle", width = "full", name = L["SOUND_WHISPER_TOGGLE"] or "Som de Sussurro", desc = L["SOUND_WHISPER_TOGGLE_DESC"] or "Ativar som para sussurros", get = function() return self.db.profile.sound.whisperSoundEnabled end, set = function(_, v) self.db.profile.sound.whisperSoundEnabled = v end },
-                    whisperSound = { order = 2, type = "select", width = "full", name = L["SOUND_WHISPER_SELECT"] or "Escolher Som (Sussurro)", desc = L["SOUND_WHISPER_SELECT_DESC"] or "Clique para prévia", values = GetSoundList(), get = function() return tostring(self.db.profile.sound.whisperSound) end, set = function(_, v) self.db.profile.sound.whisperSound = tonumber(v); PlaySound(tonumber(v), self.db.profile.sound.volume) end },
-                },
-            },
-            guildSoundGroup = {
+                labelKey = "SOUND_WHISPER",
+                labelFallback = "Whisper Sound",
+                toggleKey = "SOUND_WHISPER_TOGGLE",
+                toggleFallback = "Som de Sussurro",
+                toggleDescKey = "SOUND_WHISPER_TOGGLE_DESC",
+                toggleDescFallback = "Ativar som para sussurros",
+                selectKey = "SOUND_WHISPER_SELECT",
+                selectFallback = "Escolher Som (Sussurro)",
+                selectDescKey = "SOUND_WHISPER_SELECT_DESC",
+                selectDescFallback = "Clique para previa",
+                enabledField = "whisperSoundEnabled",
+                soundField = "whisperSound",
+            }),
+            guildSoundGroup = CreateSoundGroup({
                 order = 40,
-                type = "group",
-                inline = true,
-                name = L["SOUND_GUILD"] or "Guild Sound",
-                args = {
-                    guildSoundEnabled = { order = 1, type = "toggle", width = "full", name = L["SOUND_GUILD_TOGGLE"] or "Som de Guilda", desc = L["SOUND_GUILD_TOGGLE_DESC"] or "Ativar som para guilda", get = function() return self.db.profile.sound.guildSoundEnabled end, set = function(_, v) self.db.profile.sound.guildSoundEnabled = v end },
-                    guildSound = { order = 2, type = "select", width = "full", name = L["SOUND_GUILD_SELECT"] or "Escolher Som (Guilda)", desc = L["SOUND_GUILD_SELECT_DESC"] or "Clique para prévia", values = GetSoundList(), get = function() return tostring(self.db.profile.sound.guildSound) end, set = function(_, v) self.db.profile.sound.guildSound = tonumber(v); PlaySound(tonumber(v), self.db.profile.sound.volume) end },
-                },
-            },
-            partySoundGroup = {
+                labelKey = "SOUND_GUILD",
+                labelFallback = "Guild Sound",
+                toggleKey = "SOUND_GUILD_TOGGLE",
+                toggleFallback = "Som de Guilda",
+                toggleDescKey = "SOUND_GUILD_TOGGLE_DESC",
+                toggleDescFallback = "Ativar som para guilda",
+                selectKey = "SOUND_GUILD_SELECT",
+                selectFallback = "Escolher Som (Guilda)",
+                selectDescKey = "SOUND_GUILD_SELECT_DESC",
+                selectDescFallback = "Clique para previa",
+                enabledField = "guildSoundEnabled",
+                soundField = "guildSound",
+            }),
+            partySoundGroup = CreateSoundGroup({
                 order = 41,
-                type = "group",
-                inline = true,
-                name = L["SOUND_PARTY"] or "Party Sound",
-                args = {
-                    partySoundEnabled = { order = 1, type = "toggle", width = "full", name = L["SOUND_PARTY_TOGGLE"] or "Som de Grupo", desc = L["SOUND_PARTY_TOGGLE_DESC"] or "Ativar som para grupo", get = function() return self.db.profile.sound.partySoundEnabled end, set = function(_, v) self.db.profile.sound.partySoundEnabled = v end },
-                    partySound = { order = 2, type = "select", width = "full", name = L["SOUND_PARTY_SELECT"] or "Escolher Som (Grupo)", desc = L["SOUND_PARTY_SELECT_DESC"] or "Clique para prévia", values = GetSoundList(), get = function() return tostring(self.db.profile.sound.partySound) end, set = function(_, v) self.db.profile.sound.partySound = tonumber(v); PlaySound(tonumber(v), self.db.profile.sound.volume) end },
-                },
-            },
-            raidSoundGroup = {
+                labelKey = "SOUND_PARTY",
+                labelFallback = "Party Sound",
+                toggleKey = "SOUND_PARTY_TOGGLE",
+                toggleFallback = "Som de Grupo",
+                toggleDescKey = "SOUND_PARTY_TOGGLE_DESC",
+                toggleDescFallback = "Ativar som para grupo",
+                selectKey = "SOUND_PARTY_SELECT",
+                selectFallback = "Escolher Som (Grupo)",
+                selectDescKey = "SOUND_PARTY_SELECT_DESC",
+                selectDescFallback = "Clique para previa",
+                enabledField = "partySoundEnabled",
+                soundField = "partySound",
+            }),
+            raidSoundGroup = CreateSoundGroup({
                 order = 42,
-                type = "group",
-                inline = true,
-                name = L["SOUND_RAID"] or "Raid Sound",
-                args = {
-                    raidSoundEnabled = { order = 1, type = "toggle", width = "full", name = L["SOUND_RAID_TOGGLE"] or "Som de Raide", desc = L["SOUND_RAID_TOGGLE_DESC"] or "Ativar som para raide", get = function() return self.db.profile.sound.raidSoundEnabled end, set = function(_, v) self.db.profile.sound.raidSoundEnabled = v end },
-                    raidSound = { order = 2, type = "select", width = "full", name = L["SOUND_RAID_SELECT"] or "Escolher Som (Raide)", desc = L["SOUND_RAID_SELECT_DESC"] or "Clique para prévia", values = GetSoundList(), get = function() return tostring(self.db.profile.sound.raidSound) end, set = function(_, v) self.db.profile.sound.raidSound = tonumber(v); PlaySound(tonumber(v), self.db.profile.sound.volume) end },
-                },
-            },
+                labelKey = "SOUND_RAID",
+                labelFallback = "Raid Sound",
+                toggleKey = "SOUND_RAID_TOGGLE",
+                toggleFallback = "Som de Raide",
+                toggleDescKey = "SOUND_RAID_TOGGLE_DESC",
+                toggleDescFallback = "Ativar som para raide",
+                selectKey = "SOUND_RAID_SELECT",
+                selectFallback = "Escolher Som (Raide)",
+                selectDescKey = "SOUND_RAID_SELECT_DESC",
+                selectDescFallback = "Clique para previa",
+                enabledField = "raidSoundEnabled",
+                soundField = "raidSound",
+            }),
             behaviorHeader = { order = 50, type = "header", name = L["SECTION_BEHAVIOR"] or "Behavior" },
             displayTime = { order = 51, type = "range", name = L["DISPLAY_TIME"] or "Tempo de Exibição", desc = L["DISPLAY_TIME_DESC"] or "Quantos segundos fica visível", min = 3, max = 30, step = 1, width = "full", get = function() return self.db.profile.behavior.displayTime end, set = function(_, v) self.db.profile.behavior.displayTime = v end },
             showPortrait = { order = 52, type = "toggle", name = L["SHOW_PORTRAIT"] or "Mostrar Retrato", desc = L["SHOW_PORTRAIT_DESC"] or "Exibir retrato", width = "full", get = function() return self.db.profile.behavior.showPortrait end, set = function(_, v) self.db.profile.behavior.showPortrait = v end },
