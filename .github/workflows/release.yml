@@ -13,18 +13,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install cfpackager
-        run: |
-          python -m pip install --upgrade pip
-          pip install cfpackager
-
-      - name: Build addon
+      - name: Build addon with BigWigs packager
         env:
-          CURSEFORGE_API_TOKEN: ${{ secrets.CURSEFORGE_API_TOKEN }}
+          CF_API_KEY: ${{ secrets.CURSEFORGE_API_TOKEN }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
           WOWINTERFACE_API_TOKEN: ${{ secrets.WOWINTERFACE_API_TOKEN }}
         run: |
-          cfpackager package
+          curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh | bash -s --
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
