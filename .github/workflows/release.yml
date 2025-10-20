@@ -29,6 +29,7 @@ jobs:
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_API_TOKEN }}
           GAME_VERSION_IDS: ${{ secrets.CURSEFORGE_GAME_VERSION_IDS }}
           PROJECT_ID: "1367932"
+        shell: bash
         run: |
           ZIP_PATH=$(ls .release/*.zip | head -n 1)
           if [ -z "$ZIP_PATH" ]; then
