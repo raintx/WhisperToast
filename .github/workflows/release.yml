@@ -24,7 +24,7 @@ jobs:
           path: .release/*
 
       - name: Publish to CurseForge
-        if: ${{ secrets.CURSEFORGE_API_TOKEN && secrets.CURSEFORGE_GAME_VERSION_IDS }}
+        if: ${{ secrets.CURSEFORGE_API_TOKEN != '' && secrets.CURSEFORGE_GAME_VERSION_IDS != '' }}
         env:
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_API_TOKEN }}
           GAME_VERSION_IDS: ${{ secrets.CURSEFORGE_GAME_VERSION_IDS }}
@@ -44,25 +44,25 @@ jobs:
 
           export VERSION
           python - <<'PY'
-          import json, os
+    import json, os
 
-          version = os.environ["VERSION"]
-          game_versions = [
-              int(item.strip())
-              for item in os.environ["GAME_VERSION_IDS"].split(",")
-              if item.strip()
-          ]
+    version = os.environ["VERSION"]
+    game_versions = [
+        int(item.strip())
+        for item in os.environ["GAME_VERSION_IDS"].split(",")
+        if item.strip()
+    ]
 
-          metadata = {
-              "displayName": f"WhisperToast {version}",
-              "gameVersions": game_versions,
-              "releaseType": "release",
-              "changelogType": "markdown",
-              "changelog": f"Automated build {version}",
-          }
+    metadata = {
+        "displayName": f"WhisperToast {version}",
+        "gameVersions": game_versions,
+        "releaseType": "release",
+        "changelogType": "markdown",
+        "changelog": f"Automated build {version}",
+    }
 
-          with open("metadata.json", "w", encoding="utf-8") as fp:
-              json.dump(metadata, fp)
+    with open("metadata.json", "w", encoding="utf-8") as fp:
+        json.dump(metadata, fp)
           PY
 
           curl -sS -X POST \
