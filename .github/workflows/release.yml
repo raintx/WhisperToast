@@ -42,15 +42,28 @@ jobs:
             VERSION="${GITHUB_SHA::7}"
           fi
 
-          cat <<EOF > metadata.json
-{
-  "displayName": "WhisperToast ${VERSION}",
-  "gameVersions": [${GAME_VERSION_IDS}],
-  "releaseType": "release",
-  "changelogType": "markdown",
-  "changelog": "Automated build ${VERSION}"
+          export VERSION
+          python - <<'PY'
+import json, os
+
+version = os.environ["VERSION"]
+game_versions = [
+    int(item.strip())
+    for item in os.environ["GAME_VERSION_IDS"].split(",")
+    if item.strip()
+]
+
+metadata = {
+    "displayName": f"WhisperToast {version}",
+    "gameVersions": game_versions,
+    "releaseType": "release",
+    "changelogType": "markdown",
+    "changelog": f"Automated build {version}",
 }
-EOF
+
+with open("metadata.json", "w", encoding="utf-8") as fp:
+    json.dump(metadata, fp)
+PY
 
           curl -sS -X POST \
             -H "x-api-token: ${CURSEFORGE_TOKEN}" \
