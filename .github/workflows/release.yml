@@ -26,3 +26,37 @@ jobs:
         with:
           name: whispertoast-release
           path: .release/*
+
+      - name: Publish to CurseForge
+        if: ${{ secrets.CURSEFORGE_API_TOKEN != '' && secrets.CURSEFORGE_GAME_VERSION_IDS != '' }}
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_API_TOKEN }}
+          GAME_VERSION_IDS: ${{ secrets.CURSEFORGE_GAME_VERSION_IDS }}
+          PROJECT_ID: "1367932"
+        run: |
+          ZIP_PATH=$(ls .release/*.zip | head -n 1)
+          if [ -z "$ZIP_PATH" ]; then
+            echo "No release zip found in .release/"
+            exit 1
+          fi
+
+          VERSION="${GITHUB_REF#refs/tags/}"
+          if [ "$VERSION" = "$GITHUB_REF" ] || [ -z "$VERSION" ]; then
+            VERSION="${GITHUB_SHA::7}"
+          fi
+
+          cat <<EOF > metadata.json
+{
+  "displayName": "WhisperToast ${VERSION}",
+  "gameVersions": [${GAME_VERSION_IDS}],
+  "releaseType": "release",
+  "changelogType": "markdown",
+  "changelog": "Automated build ${VERSION}"
+}
+EOF
+
+          curl -sS -X POST \
+            -H "x-api-token: ${CURSEFORGE_TOKEN}" \
+            -F "metadata=@metadata.json" \
+            -F "file=@${ZIP_PATH}" \
+            "https://www.curseforge.com/api/projects/${PROJECT_ID}/package"
