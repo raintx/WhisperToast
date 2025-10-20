@@ -12,6 +12,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Necessário para o packager obter histórico de commits
+
+      - name: Create .pkgmeta file
+        run: |
+          cat > .pkgmeta << 'EOF'
+package-as: WhisperToast
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - .github
+  - .gitignore
+  - README.md
+
+enable-nolib-creation: no
+EOF
 
       - name: Build addon with BigWigs packager
         run: |
@@ -21,52 +40,86 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: whispertoast-release
-          path: .release/*
+          path: .release/*.zip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: .release/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to CurseForge
-        if: ${{ secrets.CURSEFORGE_API_TOKEN && secrets.CURSEFORGE_GAME_VERSION_IDS }}
+        if: startsWith(github.ref, 'refs/tags/') && secrets.CURSEFORGE_API_TOKEN != ''
         env:
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_API_TOKEN }}
-          GAME_VERSION_IDS: ${{ secrets.CURSEFORGE_GAME_VERSION_IDS }}
           PROJECT_ID: "1367932"
         shell: bash
         run: |
           ZIP_PATH=$(ls .release/*.zip | head -n 1)
           if [ -z "$ZIP_PATH" ]; then
-            echo "No release zip found in .release/"
+            echo "❌ No release zip found in .release/"
             exit 1
           fi
+          
+          echo "📦 Found release file: $ZIP_PATH"
 
           VERSION="${GITHUB_REF#refs/tags/}"
-          if [ "$VERSION" = "$GITHUB_REF" ] || [ -z "$VERSION" ]; then
-            VERSION="${GITHUB_SHA::7}"
-          fi
+          echo "🏷️ Version: $VERSION"
 
-          export VERSION
-          python - <<'PY'
-import json, os
+          # IDs de versão do WoW (atualize conforme necessário)
+          # 10.2.7 = 11127, 11.0.0 = 11501 (exemplo)
+          GAME_VERSION_IDS="11127"  # Ajuste para sua versão
 
-version = os.environ["VERSION"]
-game_versions = [
-    int(item.strip())
-    for item in os.environ["GAME_VERSION_IDS"].split(",")
-    if item.strip()
-]
-
-metadata = {
-    "displayName": f"WhisperToast {version}",
-    "gameVersions": game_versions,
-    "releaseType": "release",
-    "changelogType": "markdown",
-    "changelog": f"Automated build {version}",
+          cat <<EOF > metadata.json
+{
+  "displayName": "WhisperToast ${VERSION}",
+  "gameVersions": [${GAME_VERSION_IDS}],
+  "releaseType": "release",
+  "changelogType": "markdown",
+  "changelog": "## WhisperToast ${VERSION}\n\nAutomated release build.\n\n### Features\n- Multi-language support (9 languages)\n- Customizable notifications\n- Individual sound controls\n- Animated anchor\n- Portrait support"
 }
+EOF
 
-with open("metadata.json", "w", encoding="utf-8") as fp:
-    json.dump(metadata, fp)
-PY
-
-          curl -sS -X POST \
+          echo "📤 Uploading to CurseForge..."
+          RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST \
             -H "x-api-token: ${CURSEFORGE_TOKEN}" \
             -F "metadata=@metadata.json" \
             -F "file=@${ZIP_PATH}" \
-            "https://www.curseforge.com/api/projects/${PROJECT_ID}/package"
+            "https://www.curseforge.com/api/projects/${PROJECT_ID}/upload")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+          
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 201 ]; then
+            echo "✅ Successfully uploaded to CurseForge!"
+            echo "$BODY"
+          else
+            echo "❌ Failed to upload to CurseForge (HTTP $HTTP_CODE)"
+            echo "$BODY"
+            exit 1
+          fi
+
+      - name: Publish to WoWInterface (Optional)
+        if: startsWith(github.ref, 'refs/tags/') && secrets.WOWI_API_TOKEN != ''
+        env:
+          WOWI_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+          WOWI_ID: "YOUR_WOWI_ID"  # Substitua pelo seu ID do WoWInterface
+        shell: bash
+        run: |
+          ZIP_PATH=$(ls .release/*.zip | head -n 1)
+          VERSION="${GITHUB_REF#refs/tags/}"
+          
+          echo "📤 Uploading to WoWInterface..."
+          curl -sS -X POST \
+            -H "x-api-token: ${WOWI_TOKEN}" \
+            -F "id=${WOWI_ID}" \
+            -F "version=${VERSION}" \
+            -F "updatefile=@${ZIP_PATH}" \
+            "https://api.wowinterface.com/addons/update"
+          
+          echo "✅ Upload to WoWInterface completed!"

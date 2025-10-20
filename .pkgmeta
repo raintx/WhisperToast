@@ -1,48 +1,87 @@
 package-as: WhisperToast
 
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - .github
+  - .gitignore
+  - README.md
+  - .release
+  - .git
+  - .gitattributes
+
+enable-nolib-creation: no
+
+move-folders:
+  WhisperToast/Libs: Libs
+
 localization:
   - locale: enUS
     file: Locales/enUS.lua
     format: lua_additive_table
-    same-key-is-true: true
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: ptBR
     file: Locales/ptBR.lua
     format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: esES
     file: Locales/esES.lua
     format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: esMX
     file: Locales/esMX.lua
     format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: deDE
     file: Locales/deDE.lua
     format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: frFR
     file: Locales/frFR.lua
     format: lua_additive_table
-    handle-unlocalized: english
-  - locale: itIT
-    file: Locales/itIT.lua
-    format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: ruRU
     file: Locales/ruRU.lua
     format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: koKR
     file: Locales/koKR.lua
     format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: zhCN
     file: Locales/zhCN.lua
     format: lua_additive_table
+    same-key-is-true: false
     handle-unlocalized: english
   - locale: zhTW
     file: Locales/zhTW.lua
     format: lua_additive_table
-    handle-unlocalized: english
+    same-key-is-true: false
+    handle-unlocalized: englishpackage-as: WhisperToast
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - .github
+  - .gitignore
+  - README.md
+  - .release
+  - .git
+  - .gitattributes
+
+enable-nolib-creation: no
+
+move-folders:
+  WhisperToast/Libs: Libs
