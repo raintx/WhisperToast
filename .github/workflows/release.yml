@@ -18,7 +18,7 @@ jobs:
         env:
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
         run: |
-          $projectId = 227218
+          $projectId = 1367932
           $file = "WhisperToast-${{ github.ref_name }}.zip"
           $changelog = Get-Content CHANGELOG.md -Raw  # ou defina inline
           $metadata = @{
