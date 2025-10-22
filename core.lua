@@ -1,4 +1,4 @@
--- core.lua (VERSÃO COMPLETA E FINAL)
+-- core.lua
 
 local addonName, addon = ...
 WhisperToast = LibStub("AceAddon-3.0"):NewAddon(addonName, "AceConsole-3.0", "AceEvent-3.0")
@@ -6,30 +6,37 @@ WhisperToast = LibStub("AceAddon-3.0"):NewAddon(addonName, "AceConsole-3.0", "Ac
 local L = LibStub("AceLocale-3.0"):GetLocale("WhisperToast")
 local TOAST_SPACING = 15
 local previewSoundHandle = nil
+local previewTimer = nil
+
+WhisperToast.previewLockActive = false
+WhisperToast.previewLockToast = nil
+WhisperToast.previewLockType = nil
+WhisperToast.previewLockHooked = false
+WhisperToast.previewLockAuto = false
+WhisperToast.previewLockSuppressed = false
+
+local PREVIEW_SENDERS = {
+    WHISPER = L["PREVIEW_SENDER_WHISPER"] or "Blizzard",
+    BN = L["PREVIEW_SENDER_BN"] or "Battle.net Friend",
+    GUILD = L["PREVIEW_SENDER_GUILD"] or "Guildmate",
+    PARTY = L["PREVIEW_SENDER_PARTY"] or "Party Member",
+    RAID = L["PREVIEW_SENDER_RAID"] or "Raid Member",
+}
 
 -- Optional custom sounds. Place your .ogg/.wav files under
 -- Interface\AddOns\WhisperToast\Sounds\ and register them here.
 local SOUND_FOLDER = "Interface\\AddOns\\WhisperToast\\Sounds\\"
-local CUSTOM_SOUNDS = {
-    ["custom_sound_01"] = { label = "Custom Sound 01", file = SOUND_FOLDER .. "sound01.wav" },
-    ["custom_sound_02"] = { label = "Custom Sound 02", file = SOUND_FOLDER .. "sound02.wav" },
-    ["custom_sound_03"] = { label = "Custom Sound 03", file = SOUND_FOLDER .. "sound03.wav" },
-    ["custom_sound_04"] = { label = "Custom Sound 04", file = SOUND_FOLDER .. "sound04.wav" },
-    ["custom_sound_05"] = { label = "Custom Sound 05", file = SOUND_FOLDER .. "sound05.wav" },
-    ["custom_sound_06"] = { label = "Custom Sound 06", file = SOUND_FOLDER .. "sound06.wav" },
-    ["custom_sound_07"] = { label = "Custom Sound 07", file = SOUND_FOLDER .. "sound07.wav" },
-    ["custom_sound_08"] = { label = "Custom Sound 08", file = SOUND_FOLDER .. "sound08.wav" },
-    ["custom_sound_09"] = { label = "Custom Sound 09", file = SOUND_FOLDER .. "sound09.wav" },
-    ["custom_sound_10"] = { label = "Custom Sound 10", file = SOUND_FOLDER .. "sound10.wav" },
-    ["custom_sound_11"] = { label = "Custom Sound 11", file = SOUND_FOLDER .. "sound11.wav" },
-    ["custom_sound_12"] = { label = "Custom Sound 12", file = SOUND_FOLDER .. "sound12.wav" },
-    ["custom_sound_13"] = { label = "Custom Sound 13", file = SOUND_FOLDER .. "sound13.wav" },
-    ["custom_sound_14"] = { label = "Custom Sound 14", file = SOUND_FOLDER .. "sound14.wav" },
-    ["custom_sound_15"] = { label = "Custom Sound 15", file = SOUND_FOLDER .. "sound15.wav" },
-    ["custom_sound_16"] = { label = "Custom Sound 16", file = SOUND_FOLDER .. "sound16.wav" },
-    ["custom_sound_17"] = { label = "Custom Sound 17", file = SOUND_FOLDER .. "sound17.wav" },
-    ["custom_sound_18"] = { label = "Custom Sound 18", file = SOUND_FOLDER .. "sound18.wav" },
-}
+local CUSTOM_SOUND_COUNT = 18
+local CUSTOM_SOUNDS = {}
+for index = 1, CUSTOM_SOUND_COUNT do
+    local suffix = string.format("%02d", index)
+    local key = "custom_sound_" .. suffix
+    CUSTOM_SOUNDS[key] = {
+        labelKey = "CUSTOM_SOUND_LABEL",
+        labelArg = index,
+        file = SOUND_FOLDER .. "sound" .. suffix .. ".wav",
+    }
+end
 
 local SOUND_LABEL_KEYS = {
     [11504] = "SOUND_NAME_11504",
@@ -182,6 +189,12 @@ local defaults = {
             titleColor = { r = 0.3, g = 0.8, b = 1.0, a = 1 },
             textColor = { r = 0.9, g = 0.9, b = 0.9, a = 1 },
             maxChars = 200,
+            titleOffsetX = 0,
+            titleOffsetY = -15,
+            portraitOffsetX = 8,
+            portraitOffsetY = -7,
+            iconOffsetX = 12,
+            iconOffsetY = 0,
             whisperColor = { r = 1.0, g = 0.9, b = 0.2, a = 1 },
             bnetColor = { r = 0.0, g = 0.8, b = 1.0, a = 1 },
             guildColor = { r = 0.2, g = 0.8, b = 0.2, a = 1 },
@@ -195,7 +208,7 @@ local defaults = {
             partySound = 11487, partySoundEnabled = true,
             raidSound = 11487, raidSoundEnabled = true,
         },
-        behavior = { displayTime = 10, showPortrait = true }
+        behavior = { displayTime = 10, showPortrait = true, animatedPortrait = false, ignoreSelf = false }
     }
 }
 
@@ -338,7 +351,7 @@ function WhisperToast:OnUpdate(elapsed)
         if currentTime - lastMessageTime >= MESSAGE_THROTTLE then
             local msg = table.remove(messageQueue, 1)
             if msg then
-                self:ShowToast(msg.icon, msg.title, msg.message, msg.sender, msg.titleColor)
+                self:ShowToast(msg.icon, msg.title, msg.message, msg.sender, msg.titleColor, msg.opts)
                 lastMessageTime = currentTime
             end
         end
@@ -361,24 +374,29 @@ function WhisperToast:OnUpdate(elapsed)
                 local newAlpha = currentAlpha + (targetAlpha - currentAlpha) * (7 * elapsed)
                 newAlpha = math.max(0, math.min(1, newAlpha))
                 if math.abs(newAlpha - targetAlpha) < 0.01 then newAlpha = targetAlpha end
-                toast:SetAlpha(newAlpha)
+            toast:SetAlpha(newAlpha)
+        end
+        if toast.previewLock then
+            toast.Timer:SetValue(displayTime)
+        elseif toast.state ~= "fading_out" then
+            local timeLeft = displayTime - (GetTime() - toast.startTime)
+            if timeLeft > 0 then 
+                toast.Timer:SetValue(timeLeft)
+            else 
+                toast.state = "fading_out"
+                self:HideAnimatedPortrait(toast)
+                toast.targetAlpha = 0
             end
-            if toast.state ~= "fading_out" then
-                local timeLeft = displayTime - (GetTime() - toast.startTime)
-                if timeLeft > 0 then 
-                    toast.Timer:SetValue(timeLeft)
-                else 
-                    toast.state = "fading_out"
-                    toast.targetAlpha = 0
-                end
             end
             if toast and toast:IsShown() then
                 if toast.state == "fading_out" and toast:GetAlpha() <= 0 then 
+                    self:HideAnimatedPortrait(toast)
                     toast:Hide()
                     table.remove(activeToasts, i)
                     self:UpdateToastPositions()
                 end
             else
+                self:HideAnimatedPortrait(toast)
                 table.remove(activeToasts, i)
             end
         end
@@ -386,16 +404,39 @@ function WhisperToast:OnUpdate(elapsed)
     if #activeToasts == 0 and #messageQueue == 0 then updateFrame:Hide() end
 end
 
-function WhisperToast:Show(icon, title, message, sender, titleColor)
-    table.insert(messageQueue, {icon = icon, title = title, message = message, sender = sender, titleColor = titleColor})
+function WhisperToast:Show(icon, title, message, sender, titleColor, opts)
+    table.insert(messageQueue, {
+        icon = icon,
+        title = title,
+        message = message,
+        sender = sender,
+        titleColor = titleColor,
+        opts = opts,
+    })
     updateFrame:Show()
 end
 
-function WhisperToast:ShowToast(icon, title, message, sender, titleColor)
-    local toast = self:CreateToastFrame()
-    if not toast then return end
-    toast:SetPoint("TOP", anchor, "TOP", 0, 50)
-    toast:SetAlpha(0)
+function WhisperToast:ShowToast(icon, title, message, sender, titleColor, opts)
+    opts = opts or {}
+    local toast
+    local reused = false
+    if opts.previewLock and self.previewLockToast then
+        toast = self.previewLockToast
+        reused = true
+    else
+        toast = self:CreateToastFrame()
+        if not toast then return end
+    end
+
+    toast:ClearAllPoints()
+    if opts.previewLock then
+        toast:SetPoint("TOP", anchor, "TOP", 0, 0)
+    else
+        toast:SetPoint("TOP", anchor, "TOP", 0, 50)
+    end
+
+    self:ApplyToastAppearance(toast)
+
     local maxChars = self.db.profile.appearance.maxChars
     if #message > maxChars then message = message:sub(1, maxChars) .. "..." end
     toast.Message:SetText(message)
@@ -406,7 +447,7 @@ function WhisperToast:ShowToast(icon, title, message, sender, titleColor)
         local app = self.db.profile.appearance
         toast.Title:SetTextColor(app.titleColor.r, app.titleColor.g, app.titleColor.b, app.titleColor.a)
     end
-    
+
     self:SetToastPortrait(toast, sender, icon)
     
     local displayTime = self.db.profile.behavior.displayTime
@@ -414,10 +455,163 @@ function WhisperToast:ShowToast(icon, title, message, sender, titleColor)
     toast.Timer:SetValue(displayTime)
     toast.startTime = GetTime()
     toast.targetAlpha = 1
-    toast.state = "fading_in"
-    toast:Show()
-    table.insert(activeToasts, 1, toast)
+    if opts.previewLock then
+        toast:SetAlpha(1)
+        toast.state = "static"
+    else
+        if not reused then
+            toast:SetAlpha(0)
+        end
+        toast.state = "fading_in"
+    end
+    toast.previewLock = opts.previewLock and true or false
+    toast.previewUnit = opts.previewUnit
+    if toast.previewLock then
+        toast.previewLockType = opts.previewLockType or sender or "WHISPER"
+        self.previewLockToast = toast
+        self.previewLockActive = true
+        self.previewLockType = opts.previewLockType or self.previewLockType or "WHISPER"
+    else
+        toast.previewLockType = nil
+    end
+    if not reused then
+        toast:Show()
+        table.insert(activeToasts, 1, toast)
+    else
+        if not toast:IsShown() then
+            toast:Show()
+        end
+        -- Garanta que o toast de preview fique no topo da pilha
+        local currentIndex
+        for index, frame in ipairs(activeToasts) do
+            if frame == toast then
+                currentIndex = index
+                break
+            end
+        end
+        if not currentIndex then
+            table.insert(activeToasts, 1, toast)
+        elseif currentIndex ~= 1 then
+            table.remove(activeToasts, currentIndex)
+            table.insert(activeToasts, 1, toast)
+        end
+    end
     self:UpdateToastPositions()
+end
+
+function WhisperToast:ApplyToastAppearance(toast)
+    if not toast or not self.db or not self.db.profile then
+        return
+    end
+    local app = self.db.profile.appearance
+    if not app then
+        return
+    end
+
+    toast:SetSize(app.width, app.height)
+    if toast.SetBackdropColor then
+        toast:SetBackdropColor(app.bgColor.r, app.bgColor.g, app.bgColor.b, app.bgColor.a)
+    end
+    if toast.SetBackdropBorderColor then
+        toast:SetBackdropBorderColor(app.borderColor.r, app.borderColor.g, app.borderColor.b, app.borderColor.a)
+    end
+
+    if toast.TopGlow then
+        toast.TopGlow:SetSize(app.width + 20, 40)
+        toast.TopGlow:SetPoint("TOP", 0, 8)
+        toast.TopGlow:SetVertexColor(app.borderColor.r, app.borderColor.g, app.borderColor.b)
+    end
+
+    if toast.TopLine then
+        toast.TopLine:SetPoint("TOPLEFT", 5, -5)
+        toast.TopLine:SetPoint("TOPRIGHT", -5, -5)
+        toast.TopLine:SetHeight(2)
+        toast.TopLine:SetColorTexture(app.borderColor.r, app.borderColor.g, app.borderColor.b, 0.8)
+    end
+
+    local portraitSize = app.height - 16
+    local portraitOffsetX = app.portraitOffsetX or 8
+    local portraitOffsetY = app.portraitOffsetY or -7
+    local portraitTexture = toast.Portrait
+    if portraitTexture then
+        portraitTexture:SetSize(portraitSize, portraitSize)
+        portraitTexture:ClearAllPoints()
+        portraitTexture:SetPoint("TOPLEFT", toast, "TOPLEFT", portraitOffsetX, portraitOffsetY)
+        if toast.PortraitMask then
+            toast.PortraitMask:ClearAllPoints()
+            toast.PortraitMask:SetAllPoints(portraitTexture)
+        end
+    end
+    local portraitModel = toast.PortraitModel
+    if portraitModel then
+        portraitModel:SetSize(portraitSize, portraitSize)
+        portraitModel:ClearAllPoints()
+        portraitModel:SetPoint("CENTER", portraitTexture or toast, "CENTER", 0, 0)
+        if portraitModel.Mask then
+            portraitModel.Mask:ClearAllPoints()
+            portraitModel.Mask:SetAllPoints(portraitModel)
+        end
+    end
+    local portraitBorder = toast.PortraitBorder
+    if portraitBorder then
+        portraitBorder:SetSize(app.height - 8, app.height - 8)
+        portraitBorder:ClearAllPoints()
+        portraitBorder:SetPoint("CENTER", portraitTexture or toast, "CENTER", 0, 0)
+        portraitBorder:SetVertexColor(app.borderColor.r, app.borderColor.g, app.borderColor.b)
+    end
+
+    local iconSize = app.height - 24
+    local iconOffsetX = app.iconOffsetX or 12
+    local iconOffsetY = app.iconOffsetY or 0
+    local iconTexture = toast.Icon
+    if iconTexture then
+        iconTexture:SetSize(iconSize, iconSize)
+        iconTexture:ClearAllPoints()
+        iconTexture:SetPoint("TOPLEFT", toast, "TOPLEFT", iconOffsetX, iconOffsetY)
+        if toast.IconMask then
+            toast.IconMask:ClearAllPoints()
+            toast.IconMask:SetAllPoints(iconTexture)
+        end
+    end
+    if toast.IconGlow and iconTexture then
+        toast.IconGlow:SetSize(app.height - 12, app.height - 12)
+        toast.IconGlow:ClearAllPoints()
+        toast.IconGlow:SetPoint("CENTER", iconTexture, "CENTER", 0, 0)
+        toast.IconGlow:SetAlpha(0.4)
+        toast.IconGlow:SetVertexColor(app.borderColor.r, app.borderColor.g, app.borderColor.b)
+    end
+
+    local contentRight = math.max(portraitOffsetX + portraitSize, iconOffsetX + iconSize)
+    local textStartX = math.max(contentRight + 12, iconSize + 20)
+    local titleOffsetX = app.titleOffsetX or 0
+    local titleOffsetY = app.titleOffsetY or -15
+
+    if toast.Title then
+        toast.Title:ClearAllPoints()
+        toast.Title:SetPoint("TOPLEFT", toast, "TOPLEFT", textStartX + titleOffsetX, titleOffsetY)
+        toast.Title:SetPoint("RIGHT", toast, -12, 0)
+        toast.Title:SetTextColor(app.titleColor.r, app.titleColor.g, app.titleColor.b, app.titleColor.a)
+    end
+    if toast.Message then
+        toast.Message:ClearAllPoints()
+        toast.Message:SetPoint("TOPLEFT", (toast.Title or toast), "BOTTOMLEFT", 0, -4)
+        toast.Message:SetPoint("BOTTOMRIGHT", toast, -12, 12)
+        toast.Message:SetTextColor(app.textColor.r, app.textColor.g, app.textColor.b, app.textColor.a)
+    end
+
+    if toast.TimerBG then
+        toast.TimerBG:ClearAllPoints()
+        toast.TimerBG:SetPoint("BOTTOMLEFT", 5, 5)
+        toast.TimerBG:SetPoint("BOTTOMRIGHT", -5, 5)
+        toast.TimerBG:SetHeight(3)
+    end
+    if toast.Timer then
+        toast.Timer:ClearAllPoints()
+        toast.Timer:SetPoint("BOTTOMLEFT", 5, 5)
+        toast.Timer:SetPoint("BOTTOMRIGHT", -5, 5)
+        toast.Timer:SetHeight(3)
+        toast.Timer:SetStatusBarColor(app.borderColor.r, app.borderColor.g, app.borderColor.b, 1)
+    end
 end
 
 -- Nova função para buscar ícone de classe
@@ -498,8 +692,124 @@ function WhisperToast:TrySetPortraitFromGroup(portrait, cleanName)
     return false
 end
 
+function WhisperToast:GetUnitForSender(sender, overrideUnit)
+    if overrideUnit and UnitExists(overrideUnit) then
+        return overrideUnit
+    end
+    if not sender or sender == "" or sender:find("#") or sender:match("%|K") then
+        return nil
+    end
+    local cleanName = CleanPlayerName(sender)
+    if not cleanName or cleanName == "" then
+        return nil
+    end
+
+    local function matchesUnit(unit)
+        if not unit or not UnitExists(unit) then
+            return nil
+        end
+        local name, realm = UnitFullName(unit)
+        if not name then
+            return nil
+        end
+        if realm and realm ~= "" then
+            name = name .. "-" .. realm
+        end
+        if CleanPlayerName(name) == cleanName then
+            return unit
+        end
+        return nil
+    end
+
+    local unit = matchesUnit("player")
+    if unit then return unit end
+
+    unit = matchesUnit("target")
+    if unit then return unit end
+
+    unit = matchesUnit("focus")
+    if unit then return unit end
+
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            unit = matchesUnit("raid" .. i)
+            if unit then return unit end
+        end
+    end
+    if IsInGroup() then
+        for i = 1, GetNumSubgroupMembers() do
+            unit = matchesUnit("party" .. i)
+            if unit then return unit end
+        end
+    end
+
+    return nil
+end
+
+function WhisperToast:HideAnimatedPortrait(toast)
+    if not toast then return end
+    toast.previewUnit = nil
+    local model = toast.PortraitModel
+    if model then
+        if model.ClearModel then
+            pcall(model.ClearModel, model)
+        end
+        model:Hide()
+        if model.Mask then
+            model.Mask:Hide()
+        end
+    end
+end
+
+function WhisperToast:ApplyAnimatedPortrait(toast, unit)
+    if not unit or not UnitExists(unit) then
+        return false
+    end
+    if not self.db.profile.behavior.animatedPortrait then
+        return false
+    end
+    local model = toast.PortraitModel
+    if not model or not model.SetUnit then
+        return false
+    end
+
+    local ok = pcall(function()
+        model:ClearModel()
+        model:SetUnit(unit)
+    end)
+    if not ok then
+        self:HideAnimatedPortrait(toast)
+        return false
+    end
+
+    if model.SetPortraitZoom then
+        model:SetPortraitZoom(1)
+    end
+    if model.SetCamDistanceScale then
+        model:SetCamDistanceScale(1)
+    end
+    if model.SetAnimation then
+        model:SetAnimation(0, 0)
+    end
+    if model.SetRotation then
+        model:SetRotation(0)
+    end
+    if model.SetPosition then
+        model:SetPosition(0, 0, 0)
+    end
+
+    model:Show()
+    if model.Mask then
+        model.Mask:Show()
+    end
+    toast.Portrait:Hide()
+    toast.Icon:Hide()
+    return true
+end
+
 function WhisperToast:SetToastPortrait(toast, sender, fallbackIcon)
     local portrait = toast.Portrait
+    self:HideAnimatedPortrait(toast)
     if not self.db.profile.behavior.showPortrait or not sender then
         toast.Icon:SetTexture(fallbackIcon)
         toast.Icon:Show()
@@ -507,11 +817,20 @@ function WhisperToast:SetToastPortrait(toast, sender, fallbackIcon)
         return
     end
 
-    if sender:find("#") then
+    if sender:find("#") or sender:match("%|K") then
         toast.Icon:SetTexture(fallbackIcon)
         toast.Icon:Show()
         portrait:Hide()
         return
+    end
+
+    local unitForSender
+    if self.db.profile.behavior.animatedPortrait then
+        unitForSender = self:GetUnitForSender(sender, toast.previewUnit)
+        if unitForSender and self:ApplyAnimatedPortrait(toast, unitForSender) then
+            toast.previewUnit = unitForSender
+            return
+        end
     end
 
     if TrySetPortraitTexture(portrait, sender) then
@@ -571,14 +890,31 @@ function WhisperToast:OnChatEvent(event, message, sender, ...)
     end
 end
 
-function WhisperToast:HandleChatMessage(msgType, message, sender)
+function WhisperToast:HandleChatMessage(msgType, message, sender, opts)
+    opts = opts or {}
+    local profile = self.db.profile
+    if profile.behavior and profile.behavior.ignoreSelf and sender and not opts.previewLock and not opts.allowSelf then
+        local playerName, playerRealm = UnitFullName("player")
+        if playerName and playerName ~= "" then
+            local normalizedSender = sender
+            if not normalizedSender:find("-", 1, true) and playerRealm and playerRealm ~= "" then
+                normalizedSender = normalizedSender .. "-" .. playerRealm
+            end
+            local playerFullName = playerName
+            if playerRealm and playerRealm ~= "" then
+                playerFullName = playerFullName .. "-" .. playerRealm
+            end
+            if normalizedSender == playerName or normalizedSender == playerFullName then
+                return
+            end
+        end
+    end
     local config = MESSAGE_CONFIG[msgType]
     if not config then
         return
     end
 
-    local profile = self.db.profile
-    if not profile[config.flag] then
+    if not profile[config.flag] and not opts.previewLock then
         return
     end
 
@@ -586,15 +922,165 @@ function WhisperToast:HandleChatMessage(msgType, message, sender)
     local title = string.format(L[config.titleKey] or config.titleFallback, senderName)
     local appearance = profile.appearance or {}
     local titleColor = appearance[config.colorKey]
+    local showOpts
+    if opts.previewLock then
+        showOpts = {
+            previewLock = true,
+            previewLockType = opts.previewLockType or msgType,
+        }
+    end
 
-    self:Show(config.icon, title, message or "", sender, titleColor)
+    self:Show(config.icon, title, message or "", sender, titleColor, showOpts)
 
     local soundProfile = profile.sound or {}
     local soundEnabled = soundProfile.enabled and soundProfile[config.soundEnabledKey]
     local soundValue = soundProfile[config.soundKey]
-    if soundEnabled and soundValue then
+    if soundEnabled and soundValue and not opts.suppressSound then
         self:PlayConfiguredSound(soundValue, soundProfile.volume)
     end
+end
+
+function WhisperToast:ShowTestToastByType(msgType, suppressSound, forceLock)
+    msgType = msgType or self.previewLockType or "WHISPER"
+    local sender = PREVIEW_SENDERS[msgType] or PREVIEW_SENDERS.WHISPER
+    local previewUnit = nil
+    local playerName, playerRealm = UnitFullName("player")
+    if playerName and playerName ~= "" then
+        sender = playerName
+        if playerRealm and playerRealm ~= "" then
+            sender = sender .. "-" .. playerRealm
+        end
+        previewUnit = "player"
+    end
+    local message = L["PREVIEW_MESSAGE"] or "This is a preview notification."
+    local suppress = suppressSound and true or false
+    local lockPreview = forceLock or self.previewLockActive
+    self.previewLockType = msgType
+    local opts = { suppressSound = suppress, previewUnit = previewUnit, allowSelf = true }
+    if lockPreview then
+        opts.previewLock = true
+        opts.previewLockType = msgType
+    end
+    self:HandleChatMessage(msgType, message, sender, opts)
+end
+
+function WhisperToast:SchedulePreview(msgType)
+    if not self:IsEnabled() then return end
+    if self.previewLockActive then
+        if previewTimer then
+            previewTimer:Cancel()
+            previewTimer = nil
+        end
+        local previewType = msgType or self.previewLockType or "WHISPER"
+        self:ShowTestToastByType(previewType, true, true)
+        return
+    end
+    if previewTimer then
+        previewTimer:Cancel()
+        previewTimer = nil
+    end
+    previewTimer = C_Timer.NewTimer(0.15, function()
+        WhisperToast:ShowTestToastByType(msgType or "WHISPER", true)
+    end)
+end
+
+function WhisperToast:EnsurePreviewLock(msgType)
+    msgType = msgType or self.previewLockType or "WHISPER"
+    if self.previewLockActive then
+        if msgType then
+            self.previewLockType = msgType
+        end
+        self:RefreshPreviewLock()
+        return true
+    end
+    if self.previewLockSuppressed then
+        return false
+    end
+    if not self.previewLockActive then
+        self:SetPreviewLock(true, msgType, "auto")
+    else
+        if not self.previewLockToast or not self.previewLockToast:IsShown() then
+            self:ShowTestToastByType(msgType, true, true)
+        end
+    end
+    return true
+end
+
+function WhisperToast:ClearPreviewLock()
+    if self.previewLockToast then
+        local toast = self.previewLockToast
+        self.previewLockToast = nil
+        toast.previewLock = nil
+        toast.previewUnit = nil
+        toast:Hide()
+        self:HideAnimatedPortrait(toast)
+        for i = #activeToasts, 1, -1 do
+            if activeToasts[i] == toast then
+                table.remove(activeToasts, i)
+                break
+            end
+        end
+        self:UpdateToastPositions()
+    end
+end
+
+function WhisperToast:SetPreviewLock(enabled, msgType, source)
+    if enabled then
+        if source == "user" then
+            self.previewLockSuppressed = false
+        end
+        self.previewLockActive = true
+        self.previewLockType = msgType or self.previewLockType or "WHISPER"
+        self.previewLockAuto = source ~= "user"
+        if previewTimer then
+            previewTimer:Cancel()
+            previewTimer = nil
+        end
+        self:ShowTestToastByType(self.previewLockType, true, true)
+    else
+        if source == "user" then
+            self.previewLockSuppressed = true
+        end
+        self.previewLockActive = false
+        self.previewLockType = msgType or self.previewLockType or "WHISPER"
+        self.previewLockAuto = false
+        if previewTimer then
+            previewTimer:Cancel()
+            previewTimer = nil
+        end
+        self:ClearPreviewLock()
+    end
+    local registry = LibStub("AceConfigRegistry-3.0", true)
+    if registry then
+        registry:NotifyChange("WhisperToast")
+    end
+end
+
+function WhisperToast:RefreshPreviewLock()
+    if self.previewLockActive then
+        self:ShowTestToastByType(self.previewLockType or "WHISPER", true, true)
+    end
+end
+
+function WhisperToast:SetupPreviewLockHooks()
+    if self.previewLockHooked then
+        return
+    end
+    local function hookFrame(frame)
+        if frame and not frame.WhisperToastPreviewHooked then
+            frame:HookScript("OnHide", function()
+                if WhisperToast.previewLockActive then
+                    WhisperToast:SetPreviewLock(false, nil, "auto")
+                end
+            end)
+            frame.WhisperToastPreviewHooked = true
+        end
+    end
+    hookFrame(InterfaceOptionsFrame)
+    if SettingsPanel then
+        hookFrame(SettingsPanel)
+    end
+    self.previewLockHooked = true
 end
 
 function WhisperToast:SetupOptions()
@@ -620,7 +1106,18 @@ function WhisperToast:SetupOptions()
         for _, key in ipairs(customKeys) do
             local data = CUSTOM_SOUNDS[key]
             if data then
-                list[key] = data.label or key
+                local label
+                if data.labelKey then
+                    local localeString = L[data.labelKey]
+                    if type(localeString) == "string" then
+                        if data.labelArg ~= nil then
+                            label = string.format(localeString, data.labelArg)
+                        else
+                            label = localeString
+                        end
+                    end
+                end
+                list[key] = label or data.label or key
             end
         end
         return list
@@ -648,7 +1145,6 @@ function WhisperToast:SetupOptions()
                 sound = {
                     order = 2,
                     type = "select",
-                    width = "full",
                     name = L[spec.selectKey] or spec.selectFallback,
                     desc = L[spec.selectDescKey] or spec.selectDescFallback,
                     values = GetSoundList(),
@@ -678,31 +1174,191 @@ function WhisperToast:SetupOptions()
             },
         }
     end
+    local notificationSpecs = {
+        {
+            order = 3,
+            flag = "whispers",
+            toggleKey = "WHISPER_TOGGLE",
+            toggleFallback = "Whispers & BNet",
+            toggleDescKey = "WHISPER_DESC",
+            toggleDescFallback = "Show whisper notifications",
+            toggleWidth = 1.5,
+            defaultTestType = "WHISPER",
+            tests = {
+                {
+                    msgType = "WHISPER",
+                    labelKey = "BTN_TEST_WHISPER",
+                    labelFallback = "Test",
+                    descKey = "BTN_TEST_WHISPER_DESC",
+                    descFallback = "Preview a sample notification.",
+                    width = "half",
+                },
+                {
+                    msgType = "BN",
+                    labelKey = "BTN_TEST_BN",
+                    labelFallback = "Test",
+                    descKey = "BTN_TEST_BN_DESC",
+                    descFallback = "Preview a sample notification.",
+                    width = "half",
+                },
+            },
+        },
+        {
+            order = 4,
+            flag = "guild",
+            toggleKey = "GUILD_TOGGLE",
+            toggleFallback = "Guild",
+            toggleDescKey = "GUILD_DESC",
+            toggleDescFallback = "Show guild notifications",
+            toggleWidth = 1.5,
+            defaultTestType = "GUILD",
+            tests = {
+                {
+                    msgType = "GUILD",
+                    labelKey = "BTN_TEST_GUILD",
+                    labelFallback = "Test",
+                    descKey = "BTN_TEST_GUILD_DESC",
+                    descFallback = "Preview a sample notification.",
+                    width = "half",
+                },
+            },
+        },
+        {
+            order = 5,
+            flag = "party",
+            toggleKey = "PARTY_TOGGLE",
+            toggleFallback = "Party",
+            toggleDescKey = "PARTY_DESC",
+            toggleDescFallback = "Show party notifications",
+            toggleWidth = 1.5,
+            defaultTestType = "PARTY",
+            tests = {
+                {
+                    msgType = "PARTY",
+                    labelKey = "BTN_TEST_PARTY",
+                    labelFallback = "Test",
+                    descKey = "BTN_TEST_PARTY_DESC",
+                    descFallback = "Preview a sample notification.",
+                    width = "half",
+                },
+            },
+        },
+        {
+            order = 6,
+            flag = "raid",
+            toggleKey = "RAID_TOGGLE",
+            toggleFallback = "Raid",
+            toggleDescKey = "RAID_DESC",
+            toggleDescFallback = "Show raid notifications",
+            toggleWidth = 1.5,
+            defaultTestType = "RAID",
+            tests = {
+                {
+                    msgType = "RAID",
+                    labelKey = "BTN_TEST_RAID",
+                    labelFallback = "Test",
+                    descKey = "BTN_TEST_RAID_DESC",
+                    descFallback = "Preview a sample notification.",
+                    width = "half",
+                },
+            },
+        },
+    }
+    local notificationArgs = {}
+    for _, spec in ipairs(notificationSpecs) do
+        local previewType = spec.defaultTestType
+        if not previewType and spec.tests and spec.tests[1] then
+            previewType = spec.tests[1].msgType
+        end
+
+        local toggleOrder = spec.order
+        notificationArgs[#notificationArgs + 1] = {
+            key = string.format("%sToggle", spec.flag),
+            order = toggleOrder,
+            value = {
+                order = toggleOrder,
+                type = "toggle",
+                width = spec.toggleWidth or "half",
+                name = L[spec.toggleKey] or spec.toggleFallback,
+                desc = L[spec.toggleDescKey] or spec.toggleDescFallback,
+                get = function()
+                    return self.db.profile[spec.flag]
+                end,
+                set = function(_, value)
+                    self.db.profile[spec.flag] = value
+                    local testType = previewType
+                    if value and testType and not self.previewLockSuppressed then
+                        self:SetPreviewLock(true, testType, "auto")
+                    end
+                end,
+            },
+        }
+
+        if spec.tests then
+            for index, test in ipairs(spec.tests) do
+                local testInfo = test
+                local key = string.format("%sTestButton%d", spec.flag, index)
+                local order = spec.order + index * 0.01
+                notificationArgs[#notificationArgs + 1] = {
+                    key = key,
+                    order = order,
+                    value = {
+                        order = order,
+                        type = "execute",
+                        width = testInfo.width or "half",
+                        name = L[testInfo.labelKey] or testInfo.labelFallback,
+                        desc = L[testInfo.descKey] or testInfo.descFallback,
+                        func = function()
+                            local lock = self.previewLockActive
+                            self:ShowTestToastByType(testInfo.msgType, lock, lock)
+                        end,
+                        disabled = function()
+                            return not self.db.profile[spec.flag]
+                        end,
+                    },
+                }
+            end
+        end
+
+        notificationArgs[#notificationArgs + 1] = {
+            key = string.format("%sSpacer", spec.flag),
+            order = spec.order + 0.09,
+            value = {
+                order = spec.order + 0.09,
+                type = "description",
+                name = " ",
+                width = "full",
+            },
+        }
+    end
     local options = { 
         name = L["OPTIONS_TITLE"] or "WhisperToast", 
         type = "group", 
         args = {
             desc = { order = 1, type = "description", name = L["OPTIONS_DESC"] or "WhisperToast Settings" },
             notifHeader = { order = 2, type = "header", name = L["SECTION_NOTIFICATIONS"] or "Notification Types" },
-            whispers = { order = 3, type = "toggle", name = L["WHISPER_TOGGLE"] or "Whispers & BNet", desc = L["WHISPER_DESC"] or "Show whisper notifications", width = "full", get = function() return self.db.profile.whispers end, set = function(_, v) self.db.profile.whispers = v end },
-            guild = { order = 4, type = "toggle", name = L["GUILD_TOGGLE"] or "Guild", desc = L["GUILD_DESC"] or "Show guild notifications", width = "full", get = function() return self.db.profile.guild end, set = function(_, v) self.db.profile.guild = v end },
-            party = { order = 5, type = "toggle", name = L["PARTY_TOGGLE"] or "Party", desc = L["PARTY_DESC"] or "Show party notifications", width = "full", get = function() return self.db.profile.party end, set = function(_, v) self.db.profile.party = v end },
-            raid = { order = 6, type = "toggle", name = L["RAID_TOGGLE"] or "Raid", desc = L["RAID_DESC"] or "Show raid notifications", width = "full", get = function() return self.db.profile.raid end, set = function(_, v) self.db.profile.raid = v end },
             appearanceHeader = { order = 10, type = "header", name = L["SECTION_APPEARANCE"] or "Appearance" },
-            width = { order = 11, type = "range", name = L["WIDTH"] or "Width", min = 200, max = 500, step = 10, get = function() return self.db.profile.appearance.width end, set = function(_, v) self.db.profile.appearance.width = v; if anchor then anchor:SetSize(v, self.db.profile.appearance.height) end end },
-            height = { order = 12, type = "range", name = L["HEIGHT"] or "Height", min = 60, max = 150, step = 5, get = function() return self.db.profile.appearance.height end, set = function(_, v) self.db.profile.appearance.height = v; if anchor then anchor:SetSize(self.db.profile.appearance.width, v) end end },
-            maxChars = { order = 13, type = "range", name = L["MAX_CHARS"] or "Max Characters", desc = L["MAX_CHARS_DESC"] or "Maximum characters displayed", min = 50, max = 500, step = 10, width = "full", get = function() return self.db.profile.appearance.maxChars end, set = function(_, v) self.db.profile.appearance.maxChars = v end },
+            width = { order = 11, type = "range", name = L["WIDTH"] or "Width", min = 200, max = 500, step = 10, get = function() return self.db.profile.appearance.width end, set = function(_, v) self.db.profile.appearance.width = v; if anchor then anchor:SetSize(v, self.db.profile.appearance.height) end; self:EnsurePreviewLock() end },
+            height = { order = 12, type = "range", name = L["HEIGHT"] or "Height", min = 60, max = 150, step = 5, get = function() return self.db.profile.appearance.height end, set = function(_, v) self.db.profile.appearance.height = v; if anchor then anchor:SetSize(self.db.profile.appearance.width, v) end; self:EnsurePreviewLock() end },
+            maxChars = { order = 13, type = "range", name = L["MAX_CHARS"] or "Max Characters", desc = L["MAX_CHARS_DESC"] or "Maximum characters displayed", min = 50, max = 500, step = 10, width = "full", get = function() return self.db.profile.appearance.maxChars end, set = function(_, v) self.db.profile.appearance.maxChars = v; self:EnsurePreviewLock() end },
+            livePreview = { order = 13.5, type = "toggle", name = L["LIVE_PREVIEW"] or "Keep Preview Visible", desc = L["LIVE_PREVIEW_DESC"] or "Keep a test toast visible while adjusting offsets. Automatically hides when you close the options window.", width = "full", get = function() return self.previewLockActive end, set = function(_, value) self:SetPreviewLock(value, self.previewLockType or "WHISPER", "user") end },
+            titleOffsetX = { order = 14, type = "range", name = L["TITLE_OFFSET_X"] or "Title Offset X", desc = L["TITLE_OFFSET_X_DESC"] or "Move the title text horizontally", min = -100, max = 100, step = 1, get = function() return self.db.profile.appearance.titleOffsetX end, set = function(_, v) self.db.profile.appearance.titleOffsetX = v; self:EnsurePreviewLock() end },
+            titleOffsetY = { order = 15, type = "range", name = L["TITLE_OFFSET_Y"] or "Title Offset Y", desc = L["TITLE_OFFSET_Y_DESC"] or "Move the title text vertically", min = -100, max = 100, step = 1, get = function() return self.db.profile.appearance.titleOffsetY end, set = function(_, v) self.db.profile.appearance.titleOffsetY = v; self:EnsurePreviewLock() end },
+            portraitOffsetX = { order = 16, type = "range", name = L["PORTRAIT_OFFSET_X"] or "Portrait Offset X", desc = L["PORTRAIT_OFFSET_X_DESC"] or "Move the portrait/icon mask horizontally", min = -100, max = 100, step = 1, get = function() return self.db.profile.appearance.portraitOffsetX end, set = function(_, v) self.db.profile.appearance.portraitOffsetX = v; self:EnsurePreviewLock() end },
+            portraitOffsetY = { order = 17, type = "range", name = L["PORTRAIT_OFFSET_Y"] or "Portrait Offset Y", desc = L["PORTRAIT_OFFSET_Y_DESC"] or "Move the portrait/icon mask vertically", min = -100, max = 100, step = 1, get = function() return self.db.profile.appearance.portraitOffsetY end, set = function(_, v) self.db.profile.appearance.portraitOffsetY = v; self:EnsurePreviewLock() end },
+            iconOffsetX = { order = 18, type = "range", name = L["ICON_OFFSET_X"] or "Icon Offset X", desc = L["ICON_OFFSET_X_DESC"] or "Move the icon horizontally", min = -100, max = 100, step = 1, get = function() return self.db.profile.appearance.iconOffsetX end, set = function(_, v) self.db.profile.appearance.iconOffsetX = v; self:EnsurePreviewLock() end },
+            iconOffsetY = { order = 19, type = "range", name = L["ICON_OFFSET_Y"] or "Icon Offset Y", desc = L["ICON_OFFSET_Y_DESC"] or "Move the icon vertically", min = -100, max = 100, step = 1, get = function() return self.db.profile.appearance.iconOffsetY end, set = function(_, v) self.db.profile.appearance.iconOffsetY = v; self:EnsurePreviewLock() end },
             colorHeader = { order = 20, type = "header", name = L["SECTION_COLORS"] or "Colors" },
-            bgColor = { order = 21, type = "color", name = L["BG_COLOR"] or "Cor de Fundo", desc = L["BG_COLOR_DESC"] or "Cor do fundo da notificação", hasAlpha = true, get = function() local c = self.db.profile.appearance.bgColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.bgColor = {r=r, g=g, b=b, a=a} end },
-            borderColor = { order = 22, type = "color", name = L["BORDER_COLOR"] or "Cor da Borda", desc = L["BORDER_COLOR_DESC"] or "Cor da borda e efeitos brilhantes", hasAlpha = true, get = function() local c = self.db.profile.appearance.borderColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.borderColor = {r=r, g=g, b=b, a=a} end },
-            titleColor = { order = 23, type = "color", name = L["TITLE_COLOR"] or "Cor do Título", desc = L["TITLE_COLOR_DESC"] or "Cor padrão do título", hasAlpha = true, get = function() local c = self.db.profile.appearance.titleColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.titleColor = {r=r, g=g, b=b, a=a} end },
-            textColor = { order = 24, type = "color", name = L["TEXT_COLOR"] or "Cor do Texto", desc = L["TEXT_COLOR_DESC"] or "Cor do texto da mensagem", hasAlpha = true, get = function() local c = self.db.profile.appearance.textColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.textColor = {r=r, g=g, b=b, a=a} end },
+            bgColor = { order = 21, type = "color", name = L["BG_COLOR"] or "Cor de Fundo", desc = L["BG_COLOR_DESC"] or "Cor do fundo da notificação", hasAlpha = true, get = function() local c = self.db.profile.appearance.bgColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.bgColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
+            borderColor = { order = 22, type = "color", name = L["BORDER_COLOR"] or "Cor da Borda", desc = L["BORDER_COLOR_DESC"] or "Cor da borda e efeitos brilhantes", hasAlpha = true, get = function() local c = self.db.profile.appearance.borderColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.borderColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
+            titleColor = { order = 23, type = "color", name = L["TITLE_COLOR"] or "Cor do Título", desc = L["TITLE_COLOR_DESC"] or "Cor padrão do título", hasAlpha = true, get = function() local c = self.db.profile.appearance.titleColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.titleColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
+            textColor = { order = 24, type = "color", name = L["TEXT_COLOR"] or "Cor do Texto", desc = L["TEXT_COLOR_DESC"] or "Cor do texto da mensagem", hasAlpha = true, get = function() local c = self.db.profile.appearance.textColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.textColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
             colorTitleHeader = { order = 25, type = "header", name = L["SECTION_COLORS_CHAT"] or "Cores por Tipo de Chat" },
-            whisperColor = { order = 26, type = "color", name = L["WHISPER_COLOR"] or "Cor do Sussurro", desc = L["WHISPER_COLOR_DESC"] or "Cor do nome em sussurros", hasAlpha = true, get = function() local c = self.db.profile.appearance.whisperColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.whisperColor = {r=r, g=g, b=b, a=a} end },
-            bnetColor = { order = 27, type = "color", name = L["BNET_COLOR"] or "Cor do Battle.net", desc = L["BNET_COLOR_DESC"] or "Cor do nome em Battle.net", hasAlpha = true, get = function() local c = self.db.profile.appearance.bnetColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.bnetColor = {r=r, g=g, b=b, a=a} end },
-            guildColor = { order = 28, type = "color", name = L["GUILD_COLOR"] or "Cor da Guilda", desc = L["GUILD_COLOR_DESC"] or "Cor do nome em guilda", hasAlpha = true, get = function() local c = self.db.profile.appearance.guildColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.guildColor = {r=r, g=g, b=b, a=a} end },
-            partyColor = { order = 29, type = "color", name = L["PARTY_COLOR"] or "Cor do Grupo", desc = L["PARTY_COLOR_DESC"] or "Cor do nome em grupo", hasAlpha = true, get = function() local c = self.db.profile.appearance.partyColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.partyColor = {r=r, g=g, b=b, a=a} end },
-            raidColor = { order = 30, type = "color", name = L["RAID_COLOR"] or "Cor da Raide", desc = L["RAID_COLOR_DESC"] or "Cor do nome em raide", hasAlpha = true, get = function() local c = self.db.profile.appearance.raidColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.raidColor = {r=r, g=g, b=b, a=a} end },
+            whisperColor = { order = 26, type = "color", name = L["WHISPER_COLOR"] or "Cor do Sussurro", desc = L["WHISPER_COLOR_DESC"] or "Cor do nome em sussurros", hasAlpha = true, get = function() local c = self.db.profile.appearance.whisperColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.whisperColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
+            bnetColor = { order = 27, type = "color", name = L["BNET_COLOR"] or "Cor do Battle.net", desc = L["BNET_COLOR_DESC"] or "Cor do nome em Battle.net", hasAlpha = true, get = function() local c = self.db.profile.appearance.bnetColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.bnetColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
+            guildColor = { order = 28, type = "color", name = L["GUILD_COLOR"] or "Cor da Guilda", desc = L["GUILD_COLOR_DESC"] or "Cor do nome em guilda", hasAlpha = true, get = function() local c = self.db.profile.appearance.guildColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.guildColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
+            partyColor = { order = 29, type = "color", name = L["PARTY_COLOR"] or "Cor do Grupo", desc = L["PARTY_COLOR_DESC"] or "Cor do nome em grupo", hasAlpha = true, get = function() local c = self.db.profile.appearance.partyColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.partyColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
+            raidColor = { order = 30, type = "color", name = L["RAID_COLOR"] or "Cor da Raide", desc = L["RAID_COLOR_DESC"] or "Cor do nome em raide", hasAlpha = true, get = function() local c = self.db.profile.appearance.raidColor; return c.r, c.g, c.b, c.a end, set = function(_, r, g, b, a) self.db.profile.appearance.raidColor = {r=r, g=g, b=b, a=a}; self:EnsurePreviewLock() end },
             soundHeader = { order = 35, type = "header", name = L["SECTION_SOUND"] or "Sound" },
             soundEnabled = { order = 36, type = "toggle", name = L["SOUND_ENABLE"] or "Ativar Sons", desc = L["SOUND_ENABLE_DESC"] or "Ativa/desativa todos os sons", width = "full", get = function() return self.db.profile.sound.enabled end, set = function(_, v) self.db.profile.sound.enabled = v end },
             soundVolume = { order = 37, type = "select", name = L["SOUND_VOLUME"] or "Volume Channel", desc = L["SOUND_VOLUME_DESC"] or "Audio channel", values = {
@@ -775,15 +1431,75 @@ function WhisperToast:SetupOptions()
             }),
             behaviorHeader = { order = 50, type = "header", name = L["SECTION_BEHAVIOR"] or "Behavior" },
             displayTime = { order = 51, type = "range", name = L["DISPLAY_TIME"] or "Tempo de Exibição", desc = L["DISPLAY_TIME_DESC"] or "Quantos segundos fica visível", min = 3, max = 30, step = 1, width = "full", get = function() return self.db.profile.behavior.displayTime end, set = function(_, v) self.db.profile.behavior.displayTime = v end },
-            showPortrait = { order = 52, type = "toggle", name = L["SHOW_PORTRAIT"] or "Mostrar Retrato", desc = L["SHOW_PORTRAIT_DESC"] or "Exibir retrato", width = "full", get = function() return self.db.profile.behavior.showPortrait end, set = function(_, v) self.db.profile.behavior.showPortrait = v end },
+            showPortrait = {
+                order = 52,
+                type = "toggle",
+                name = L["SHOW_PORTRAIT"] or "Mostrar Retrato",
+                desc = L["SHOW_PORTRAIT_DESC"] or "Exibir retrato",
+                width = "full",
+                get = function()
+                    return self.db.profile.behavior.showPortrait
+                end,
+                set = function(_, v)
+                    self.db.profile.behavior.showPortrait = v
+                    if not v then
+                        self:SetPreviewLock(false, nil, "auto")
+                    else
+                        self:RefreshPreviewLock()
+                    end
+                end,
+            },
+            animatedPortrait = {
+                order = 53,
+                type = "toggle",
+                name = L["ANIMATED_PORTRAIT"] or "Animated Portrait",
+                desc = L["ANIMATED_PORTRAIT_DESC"] or "Use a 3D animated portrait when possible (self or group).",
+                width = "full",
+                disabled = function()
+                    return not self.db.profile.behavior.showPortrait
+                end,
+                get = function()
+                    return self.db.profile.behavior.animatedPortrait
+                end,
+                set = function(_, v)
+                    self.db.profile.behavior.animatedPortrait = v and true or false
+                    self:RefreshPreviewLock()
+                end,
+            },
+            ignoreSelf = {
+                order = 54,
+                type = "toggle",
+                name = L["IGNORE_SELF"] or "Ignore Own Messages",
+                desc = L["IGNORE_SELF_DESC"] or "Do not show notifications for messages you send.",
+                width = "full",
+                get = function()
+                    return self.db.profile.behavior.ignoreSelf
+                end,
+                set = function(_, v)
+                    self.db.profile.behavior.ignoreSelf = v and true or false
+                end,
+            },
             posHeader = { order = 60, type = "header", name = L["SECTION_POSITION"] or "Positioning" },
             move = { order = 61, type = "execute", name = L["BTN_MOVE"] or "Mover Âncora", desc = L["BTN_MOVE_DESC"] or "Mostra âncora animada", func = function() if anchor:IsShown() then anchor:Hide() else anchor:Show() end end },
-            test = { order = 62, type = "execute", name = L["BTN_TEST"] or "Mostrar Teste", desc = L["BTN_TEST_DESC"] or "Exibe notificação de teste", func = function() self:HandleChatMessage("WHISPER", L["TEST_MESSAGE"] or "This is a test message to see how your customization looks!", "Blizzard") end },
             reset = { order = 63, type = "execute", name = L["BTN_RESET_POS"] or "Resetar Posição", desc = L["BTN_RESET_POS_DESC"] or "Volta ao centro", func = function() self.db.profile.anchor = { point = "TOP", x = 0, y = -200 }; if anchor then anchor:ClearAllPoints(); anchor:SetPoint("TOP", UIParent, "TOP", 0, -200) end; self:Print(L["POS_RESET"] or "Position reset") end },
             resetAll = { order = 64, type = "execute", name = L["BTN_RESET_ALL"] or "Resetar Tudo", desc = L["BTN_RESET_ALL_DESC"] or "Restaura tudo", confirm = true, confirmText = L["BTN_RESET_CONFIRM"] or "Reset ALL?", func = function() self.db:ResetProfile(); ReloadUI() end }
         }
     }  
+    table.sort(notificationArgs, function(a, b) return a.order < b.order end)
+    for _, entry in ipairs(notificationArgs) do
+        options.args[entry.key] = entry.value
+    end
     LibStub("AceConfig-3.0"):RegisterOptionsTable("WhisperToast", options)
     LibStub("AceConfigDialog-3.0"):AddToBlizOptions("WhisperToast", L["OPTIONS_TITLE"] or "WhisperToast")
+    self:SetupPreviewLockHooks()
 end
+
+
+
+
+
+
+
+
+
 

@@ -1,10 +1,12 @@
--- Verificação de segurança
+-- Verifica????o de seguran??a
 if not WhisperToast then return end
 
+local L = LibStub("AceLocale-3.0"):GetLocale("WhisperToast")
+
 function WhisperToast:CreateToastFrame()
-    -- Verificação adicional
+    -- Verifica????o adicional
     if not self or not self.db or not self.db.profile or not self.db.profile.appearance then
-        self:Print("|cffff0000Erro: Configurações não carregadas. Tente /reload|r")
+        self:Print(L["ERROR_CONFIG_NOT_LOADED"] or "|cffff0000Erro: Configuracoes nao carregadas. Tente /reload.|r")
         return nil
     end
     
@@ -15,7 +17,7 @@ function WhisperToast:CreateToastFrame()
     toastFrame:SetFrameStrata("DIALOG")
     toastFrame:SetFrameLevel(100)
     
-    -- Background com cores personalizáveis
+    -- Background com cores personaliz??veis
     toastFrame:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -33,6 +35,7 @@ function WhisperToast:CreateToastFrame()
     topGlow:SetBlendMode("ADD")
     topGlow:SetAlpha(0.5)
     topGlow:SetVertexColor(app.borderColor.r, app.borderColor.g, app.borderColor.b)
+    toastFrame.TopGlow = topGlow
     
     -- Linha decorativa superior
     local topLine = toastFrame:CreateTexture(nil, "ARTWORK")
@@ -44,13 +47,37 @@ function WhisperToast:CreateToastFrame()
     
     -- RETRATO (opcional)
     local portrait = toastFrame:CreateTexture(nil, "ARTWORK")
-    portrait:SetSize(app.height - 16, app.height - 16)
-    portrait:SetPoint("LEFT", 8, 0)
+    local portraitOffsetX = app.portraitOffsetX or 8
+    local portraitOffsetY = app.portraitOffsetY or -7
+    local portraitSize = app.height - 16
+    portrait:SetSize(portraitSize, portraitSize)
+    portrait:SetPoint("TOPLEFT", toastFrame, "TOPLEFT", portraitOffsetX, portraitOffsetY)
     
     local portraitMask = toastFrame:CreateMaskTexture(nil, "ARTWORK")
     portraitMask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     portraitMask:SetAllPoints(portrait)
     portrait:AddMaskTexture(portraitMask)
+    
+    local portraitModel = CreateFrame("PlayerModel", nil, toastFrame)
+    portraitModel:SetSize(portraitSize, portraitSize)
+    portraitModel:SetPoint("CENTER", portrait, "CENTER", 0, 0)
+    portraitModel:SetFrameLevel(toastFrame:GetFrameLevel() + 1)
+    portraitModel:SetKeepModelOnHide(true)
+    portraitModel:Hide()
+
+    local portraitModelMask = toastFrame:CreateMaskTexture(nil, "ARTWORK")
+    portraitModelMask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    portraitModelMask:SetAllPoints(portraitModel)
+    if portraitModel.AddMaskTexture then
+        local ok = pcall(portraitModel.AddMaskTexture, portraitModel, portraitModelMask)
+        if ok then
+            portraitModel.Mask = portraitModelMask
+        else
+            portraitModelMask:Hide()
+        end
+    else
+        portraitModelMask:Hide()
+    end
     
     local portraitBorder = toastFrame:CreateTexture(nil, "OVERLAY")
     portraitBorder:SetTexture("Interface\\AchievementFrame\\UI-Achievement-IconFrame")
@@ -59,22 +86,29 @@ function WhisperToast:CreateToastFrame()
     portraitBorder:SetBlendMode("ADD")
     portraitBorder:SetAlpha(0.3)
     portraitBorder:SetVertexColor(app.borderColor.r, app.borderColor.g, app.borderColor.b)
+    toastFrame.PortraitBorder = portraitBorder
     
     toastFrame.Portrait = portrait
-    portrait:Hide() -- Escondido por padrão
+    toastFrame.PortraitMask = portraitMask
+    toastFrame.PortraitModel = portraitModel
+    portrait:Hide() -- Escondido por padr??o
     
-    -- Ícone (quando não usar retrato)
+    -- ??cone (quando n??o usar retrato)
     local toastIcon = toastFrame:CreateTexture(nil, "ARTWORK")
-    toastIcon:SetSize(app.height - 24, app.height - 24)
-    toastIcon:SetPoint("LEFT", 12, 0)
+    local iconOffsetX = app.iconOffsetX or 12
+    local iconOffsetY = app.iconOffsetY or 0
+    local iconSize = app.height - 24
+    toastIcon:SetSize(iconSize, iconSize)
+    toastIcon:SetPoint("TOPLEFT", toastFrame, "TOPLEFT", iconOffsetX, iconOffsetY)
     
     local iconMask = toastFrame:CreateMaskTexture(nil, "ARTWORK")
     iconMask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     iconMask:SetAllPoints(toastIcon)
     toastIcon:AddMaskTexture(iconMask)
     toastFrame.Icon = toastIcon
+    toastFrame.IconMask = iconMask
     
-    -- Brilho ao redor do ícone
+    -- Brilho ao redor do ??cone
     local iconGlow = toastFrame:CreateTexture(nil, "ARTWORK")
     iconGlow:SetTexture("Interface\\AchievementFrame\\UI-Achievement-IconFrame")
     iconGlow:SetSize(app.height - 12, app.height - 12)
@@ -82,17 +116,22 @@ function WhisperToast:CreateToastFrame()
     iconGlow:SetBlendMode("ADD")
     iconGlow:SetAlpha(0.4)
     iconGlow:SetVertexColor(app.borderColor.r, app.borderColor.g, app.borderColor.b)
+    toastFrame.IconGlow = iconGlow
     
-    -- Calcular posição do texto baseado no tamanho
-    local iconSize = app.height - 24
-    local textStartX = iconSize + 20
+    -- Calcular posi????o do texto baseado no tamanho
+    local portraitRight = portraitOffsetX + portraitSize
+    local iconRight = iconOffsetX + iconSize
+    local contentRight = math.max(portraitRight, iconRight)
+    local textStartX = math.max(contentRight + 12, iconSize + 20)
     
-    -- Título (remetente) - REMOVIDA A COR FIXA
+    -- T??tulo (remetente) - REMOVIDA A COR FIXA
     local toastTitle = toastFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    toastTitle:SetPoint("TOPLEFT", textStartX, -8)
+    local titleOffsetX = app.titleOffsetX or 0
+    local titleOffsetY = app.titleOffsetY or -15
+    toastTitle:SetPoint("TOPLEFT", toastFrame, "TOPLEFT", textStartX + titleOffsetX, titleOffsetY)
     toastTitle:SetPoint("RIGHT", toastFrame, -12, 0)
     toastTitle:SetJustifyH("LEFT")
-    -- A cor será definida dinamicamente baseada no tipo de chat
+    -- A cor ser?? definida dinamicamente baseada no tipo de chat
     toastTitle:SetShadowColor(0, 0, 0, 1)
     toastTitle:SetShadowOffset(1, -1)
     toastFrame.Title = toastTitle
@@ -116,6 +155,7 @@ function WhisperToast:CreateToastFrame()
     timerBg:SetPoint("BOTTOMLEFT", 5, 5)
     timerBg:SetPoint("BOTTOMRIGHT", -5, 5)
     timerBg:SetHeight(3)
+    toastFrame.TimerBG = timerBg
     
     local timerBar = CreateFrame("StatusBar", nil, toastFrame)
     timerBar:SetPoint("BOTTOMLEFT", 5, 5)
@@ -127,7 +167,7 @@ function WhisperToast:CreateToastFrame()
     timerBar:SetStatusBarColor(app.borderColor.r, app.borderColor.g, app.borderColor.b, 1)
     toastFrame.Timer = timerBar
     
-    -- Botão de fechar
+    -- Bot??o de fechar
     local closeButton = CreateFrame("Button", nil, toastFrame)
     closeButton:SetSize(16, 16)
     closeButton:SetPoint("TOPRIGHT", -4, -4)
@@ -136,6 +176,9 @@ function WhisperToast:CreateToastFrame()
     closeButton:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
     closeButton:SetScript("OnClick", function()
         toastFrame.state = "fading_out"
+        if WhisperToast and WhisperToast.HideAnimatedPortrait then
+            WhisperToast:HideAnimatedPortrait(toastFrame)
+        end
         toastFrame.targetAlpha = 0
     end)
     
@@ -164,3 +207,4 @@ function WhisperToast:CreateToastFrame()
     toastFrame:Hide()
     return toastFrame
 end
+
